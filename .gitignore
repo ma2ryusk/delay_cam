@@ -14,3 +14,5 @@ android-signing/
 *.p12
 *.jks
 *.keystore
+Android署名鍵_バックアップ.zip
+*署名鍵*
