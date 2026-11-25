@@ -187,7 +187,7 @@
         <!-- ズーム・パン変換レイヤー -->
         <div id="zoomTransformLayer" class="w-full h-full flex items-center justify-center pointer-events-none">
             <!-- 遅延再生メインCanvas（全体が欠けないようアスペクト比維持最大化） -->
-            <canvas id="playbackCanvas" class="w-full h-full object-contain pointer-events-none"></canvas>
+            <canvas id="playbackCanvas" class="w-full h-full object-cover pointer-events-none"></canvas>
         </div>
 
         <!-- UI非表示モード中のミニマル復帰バッジ -->
@@ -310,17 +310,38 @@
             <p class="text-[11px] text-slate-400">※今後の録画フレーム自体の拡大倍率を変更します</p>
         </div>
 
-        <!-- 画質設定 -->
+        <!-- フレーム数（fps）設定 -->
         <div class="space-y-1.5">
-            <p class="font-bold text-xs text-slate-300">録画解像度・最大遅延時間</p>
+            <div class="flex items-center justify-between">
+                <p class="font-bold text-xs text-slate-300">フレーム数（1秒あたりのコマ数）</p>
+                <span class="text-[11px] text-slate-400">実測 <strong id="actualFpsText" class="text-white tabular-nums">-</strong> fps</span>
+            </div>
+            <div class="grid grid-cols-4 gap-2">
+                <button type="button" data-fps="15" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">15</button>
+                <button type="button" data-fps="24" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">24</button>
+                <button type="button" data-fps="30" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">30</button>
+                <button type="button" data-fps="60" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">60</button>
+            </div>
+            <p class="text-[11px] text-slate-400">※ コマ数を上げると動きがなめらかになりますが、長い遅延はかけにくくなります。端末の性能を超える分は自動で間引かれます。</p>
+        </div>
+
+        <!-- 表示方法 -->
+        <div class="space-y-1.5">
+            <p class="font-bold text-xs text-slate-300">表示方法</p>
             <div class="grid grid-cols-2 gap-2">
-                <button type="button" data-quality="standard" class="quality-btn py-2 px-2 rounded-xl font-bold bg-brand-orange text-white text-xs">
-                    標準 (480p / 120秒)
+                <button type="button" data-fit="cover" class="fit-btn py-2 px-2 rounded-xl font-bold text-xs bg-brand-orange text-white border border-brand-orange">
+                    全画面（端を少し切る）
                 </button>
-                <button type="button" data-quality="high" class="quality-btn py-2 px-2 rounded-xl font-bold bg-navy-800 text-slate-300 border border-navy-700 text-xs">
-                    高画質 (720p / 60秒)
+                <button type="button" data-fit="contain" class="fit-btn py-2 px-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700">
+                    全体（黒い帯あり）
                 </button>
             </div>
+        </div>
+
+        <!-- カメラ情報 -->
+        <div class="flex items-center justify-between text-[11px] text-slate-400 bg-white/5 rounded-xl px-2.5 py-2 border border-white/10">
+            <span>カメラ解像度: <strong id="cameraResText" class="text-white tabular-nums">-</strong></span>
+            <span>遅延できる最大: <strong id="maxDelayText" class="text-brand-orange tabular-nums">-</strong></span>
         </div>
 
         <!-- 便利オプション群 -->
@@ -500,7 +521,11 @@
             const settingsToggleBtn = document.getElementById('settingsToggleBtn');
             const closeSettingsBtn = document.getElementById('closeSettingsBtn');
             const settingsPanel = document.getElementById('settingsPanel');
-            const qualityBtns = document.querySelectorAll('.quality-btn');
+            const fpsBtns = document.querySelectorAll('.fps-btn');
+            const fitBtns = document.querySelectorAll('.fit-btn');
+            const actualFpsText = document.getElementById('actualFpsText');
+            const cameraResText = document.getElementById('cameraResText');
+            const maxDelayText = document.getElementById('maxDelayText');
             const bufferCountText = document.getElementById('bufferCountText');
             const memoryUsageText = document.getElementById('memoryUsageText');
 
@@ -512,12 +537,20 @@
             const resumeCameraBtn = document.getElementById('resumeCameraBtn');
 
             // --- アプリケーション状態管理 ---
-            const QUALITY_PRESETS = {
-                standard: { width: 640, height: 480, fps: 15, jpegQuality: 0.72, maxDelay: 120 },
-                high: { width: 960, height: 540, fps: 24, jpegQuality: 0.78, maxDelay: 60 }
+            // 撮影設定：解像度はカメラ任せ（フルHDを上限に、端末が出せる最大の画質を使う）
+            // ※ それ以上（4K等）は1コマごとの圧縮が重く、メモリもすぐ埋まるため上限を設ける
+            const CAPTURE = {
+                idealWidth: 1920,
+                idealHeight: 1080,
+                jpegQuality: 0.8
             };
+            const MAX_DELAY_SEC = 120;                    // 遅延秒数の上限（UI）
+            const MAX_MEMORY_BYTES = 300 * 1024 * 1024;   // 映像をためておくメモリの上限
+            const FPS_OPTIONS = [15, 24, 30, 60];
 
-            let currentQuality = 'standard';
+            let targetFps = 30;
+            let fitMode = 'cover';           // 'cover' = 全画面（端を切る） / 'contain' = 全体表示（黒帯）
+            let memoryCapped = false;        // メモリ上限により古いコマを捨てている状態か
             let targetDelaySec = 10;
             let facingMode = 'environment';
             let isMirrored = false;
@@ -552,7 +585,7 @@
             let panX = 0;
             let panY = 0;
 
-            // --- 実際の映像描画領域（object-contain準拠）に基づく厳密なパンクランプ ---
+            // --- 実際の映像描画領域（object-cover / object-contain の表示方法に準拠）に基づく厳密なパンクランプ ---
             function getRenderedVideoBounds() {
                 const stageRect = videoStage.getBoundingClientRect();
                 const stageW = stageRect.width || window.innerWidth;
@@ -565,10 +598,21 @@
 
                 let drawnW = stageW;
                 let drawnH = stageH;
-                if (vidAspect > stageAspect) {
-                    drawnH = stageW / vidAspect;
+                const videoIsWider = vidAspect > stageAspect;
+                if (fitMode === 'cover') {
+                    // 画面いっぱいに拡大（はみ出た部分は切れる）
+                    if (videoIsWider) {
+                        drawnW = stageH * vidAspect;
+                    } else {
+                        drawnH = stageW / vidAspect;
+                    }
                 } else {
-                    drawnW = stageH * vidAspect;
+                    // 全体が収まるように縮小（余白は黒帯）
+                    if (videoIsWider) {
+                        drawnH = stageW / vidAspect;
+                    } else {
+                        drawnW = stageH * vidAspect;
+                    }
                 }
                 return { stageW, stageH, drawnW, drawnH };
             }
@@ -922,9 +966,11 @@
             // --- 画面回転・リサイズ時のアスペクト比同期 ---
             function syncCanvasDimensions() {
                 if (!video || video.readyState < 1) return;
-                const preset = QUALITY_PRESETS[currentQuality];
-                const vw = video.videoWidth || preset.width;
-                const vh = video.videoHeight || preset.height;
+                const vw = video.videoWidth || 640;
+                const vh = video.videoHeight || 480;
+                if (video.videoWidth) {
+                    cameraResText.textContent = `${video.videoWidth}×${video.videoHeight}`;
+                }
 
                 if (captureCanvas.width !== vw || captureCanvas.height !== vh) {
                     captureCanvas.width = vw;
@@ -977,13 +1023,39 @@
                 totalBufferBytes = 0;
                 lastDrawnFrameTimestamp = 0;
                 pendingDrawFrame = null;
+                memoryCapped = false;
                 updateBufferStats();
+            }
+
+            // 直近の実測fps（直近約2秒のコマ数から算出）
+            function measureActualFps() {
+                const n = frameBuffer.length;
+                if (n < 2) return 0;
+                const newest = frameBuffer[n - 1].timestamp;
+                let i = n - 1;
+                while (i > 0 && newest - frameBuffer[i - 1].timestamp <= 2000) i--;
+                const span = (newest - frameBuffer[i].timestamp) / 1000;
+                return span > 0.3 ? (n - 1 - i) / span : 0;
+            }
+
+            // 今の画質・コマ数のまま、メモリ上限までためた場合に遅延できる最大秒数の目安
+            function estimateMaxDelaySec() {
+                const n = frameBuffer.length;
+                const fps = measureActualFps();
+                if (n < 10 || fps <= 0) return null;
+                const avgBytes = totalBufferBytes / n;
+                return Math.min(MAX_DELAY_SEC, Math.floor(MAX_MEMORY_BYTES / (avgBytes * fps)));
             }
 
             function updateBufferStats() {
                 bufferCountText.textContent = frameBuffer.length;
                 const mb = (totalBufferBytes / (1024 * 1024)).toFixed(1);
                 memoryUsageText.textContent = `${mb} MB`;
+
+                const fps = measureActualFps();
+                actualFpsText.textContent = fps > 0 ? fps.toFixed(0) : '-';
+                const maxSec = estimateMaxDelaySec();
+                maxDelayText.textContent = maxSec === null ? '-' : `約${maxSec}秒`;
             }
 
             // --- カメラ初期化・ストリーム取得 ---
@@ -1010,14 +1082,14 @@
                     return;
                 }
 
-                const preset = QUALITY_PRESETS[currentQuality];
+                // 解像度は「理想値」だけを伝え、実際の画質はカメラが出せる範囲で決まる
                 const constraints = {
                     audio: false,
                     video: {
                         facingMode: { ideal: facingMode },
-                        width: { ideal: preset.width },
-                        height: { ideal: preset.height },
-                        frameRate: { ideal: preset.fps }
+                        width: { ideal: CAPTURE.idealWidth },
+                        height: { ideal: CAPTURE.idealHeight },
+                        frameRate: { ideal: targetFps }
                     }
                 };
 
@@ -1056,6 +1128,7 @@
 
                     syncCanvasDimensions();
                     setupHardwareZoom(stream);
+                    updateFpsAvailability(stream);
 
                     // 前面カメラ時は自動で左右反転をONにすると自然
                     if (facingMode === 'user' && !isMirrored) {
@@ -1131,12 +1204,104 @@
                 }
             });
 
+            // --- JPEG圧縮ワーカー（複数の裏方スレッドで並列に圧縮し、高画質でもコマ数を確保する） ---
+            // 1コマのJPEG圧縮はフルHDだと重いため、1本ずつ順番に圧縮するとコマ数が大きく落ちる。
+            // OffscreenCanvas が使える端末では、端末のCPUコア数に応じて複数ワーカーで同時に圧縮する。
+            const ENCODER_WORKER_SRC = `
+                let oc = null, ox = null;
+                onmessage = async (e) => {
+                    const { id, bmp, quality } = e.data;
+                    try {
+                        if (!oc || oc.width !== bmp.width || oc.height !== bmp.height) {
+                            oc = new OffscreenCanvas(bmp.width, bmp.height);
+                            ox = oc.getContext('2d', { alpha: false });
+                        }
+                        ox.drawImage(bmp, 0, 0);
+                        bmp.close();
+                        const blob = await oc.convertToBlob({ type: 'image/jpeg', quality });
+                        postMessage({ id, blob });
+                    } catch (err) {
+                        try { bmp.close(); } catch (_) {}
+                        postMessage({ id, blob: null });
+                    }
+                };
+            `;
+            const encoderPool = [];       // { worker, busy }
+            const encoderJobs = new Map(); // id -> { timestamp, gen }
+            let encoderJobSeq = 0;
+            let encoderPoolFailed = false;
+
+            function canUseEncoderPool() {
+                return !encoderPoolFailed && typeof Worker !== 'undefined' &&
+                    typeof OffscreenCanvas !== 'undefined' && 'convertToBlob' in OffscreenCanvas.prototype &&
+                    typeof createImageBitmap === 'function';
+            }
+
+            function ensureEncoderPool() {
+                if (encoderPool.length > 0 || !canUseEncoderPool()) return;
+                try {
+                    const url = URL.createObjectURL(new Blob([ENCODER_WORKER_SRC], { type: 'text/javascript' }));
+                    const cores = navigator.hardwareConcurrency || 4;
+                    const size = Math.max(2, Math.min(4, cores - 2));
+                    for (let i = 0; i < size; i++) {
+                        const entry = { worker: new Worker(url), busy: false };
+                        entry.worker.onmessage = (e) => {
+                            entry.busy = false;
+                            const job = encoderJobs.get(e.data.id);
+                            encoderJobs.delete(e.data.id);
+                            if (job && e.data.blob && job.gen === bufferGeneration) {
+                                storeFrame(job.timestamp, e.data.blob);
+                            }
+                        };
+                        entry.worker.onerror = () => {
+                            // ワーカーが使えない環境では従来の方式（toBlob）に切り替える
+                            encoderPoolFailed = true;
+                            entry.busy = false;
+                        };
+                        encoderPool.push(entry);
+                    }
+                } catch (_) {
+                    encoderPoolFailed = true;
+                }
+            }
+
+            // 圧縮済みのコマをバッファに追加（並列圧縮で順番が前後しても時刻順に並べる）
+            const maxBufferSeconds = MAX_DELAY_SEC + 5;
+            let lastStatsUpdate = 0;
+            function storeFrame(timestamp, blob) {
+                const frame = { timestamp, blob, size: blob.size };
+                let i = frameBuffer.length;
+                while (i > 0 && frameBuffer[i - 1].timestamp > timestamp) i--;
+                frameBuffer.splice(i, 0, frame);
+                totalBufferBytes += blob.size;
+
+                const newest = frameBuffer[frameBuffer.length - 1].timestamp;
+                const cutoffTime = newest - (maxBufferSeconds * 1000);
+                while (frameBuffer.length > 0 && frameBuffer[0].timestamp < cutoffTime) {
+                    const removed = frameBuffer.shift();
+                    totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
+                }
+
+                while (totalBufferBytes > MAX_MEMORY_BYTES && frameBuffer.length > 10) {
+                    const removed = frameBuffer.shift();
+                    totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
+                }
+                // メモリ上限いっぱいまでたまっている（＝これ以上長い遅延はかけられない）状態か
+                memoryCapped = totalBufferBytes >= MAX_MEMORY_BYTES * 0.95;
+
+                // 統計表示は約0.5秒ごとに更新（コマ数が一定でも止まらないよう時間で判定）
+                const now = performance.now();
+                if (now - lastStatsUpdate > 500) {
+                    lastStatsUpdate = now;
+                    updateBufferStats();
+                }
+            }
+
             // --- フレームキャプチャループ（リングバッファ蓄積・バックプレッシャー制御） ---
             function startCaptureLoop() {
                 stopCaptureLoop();
-                const preset = QUALITY_PRESETS[currentQuality];
-                const intervalMs = Math.round(1000 / preset.fps);
-                const maxBufferSeconds = preset.maxDelay + 5;
+                ensureEncoderPool();
+                const intervalMs = Math.max(10, Math.round(1000 / targetFps));
 
                 captureTimerId = setInterval(() => {
                     if (!stream || video.readyState < 2) return;
@@ -1158,10 +1323,26 @@
                         livePipCtx.drawImage(video, 0, 0, livePipCanvas.width, livePipCanvas.height);
                     }
 
+                    const genAtCapture = bufferGeneration;
+
+                    // 方式1：並列ワーカーで圧縮（空いているワーカーが無ければこのコマは見送る）
+                    if (canUseEncoderPool() && encoderPool.length > 0) {
+                        const free = encoderPool.find(e => !e.busy);
+                        if (!free) return;
+                        free.busy = true;
+                        createImageBitmap(video).then((bmp) => {
+                            const id = ++encoderJobSeq;
+                            encoderJobs.set(id, { timestamp: now, gen: genAtCapture });
+                            free.worker.postMessage({ id, bmp, quality: CAPTURE.jpegQuality }, [bmp]);
+                        }).catch(() => {
+                            free.busy = false;
+                        });
+                        return;
+                    }
+
+                    // 方式2（ワーカー非対応端末）：従来どおり1コマずつ圧縮
                     // エンコード中（isCapturingBlob）はスキップしてメモリ詰まり・コールバック滞留を防止
                     if (isCapturingBlob) return;
-
-                    const genAtCapture = bufferGeneration;
                     isCapturingBlob = true;
                     captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
 
@@ -1169,30 +1350,8 @@
                         isCapturingBlob = false;
                         // バッファリセット後・無効Blobは即破棄
                         if (!blob || genAtCapture !== bufferGeneration) return;
-
-                        frameBuffer.push({
-                            timestamp: now,
-                            blob: blob,
-                            size: blob.size
-                        });
-                        totalBufferBytes += blob.size;
-
-                        const cutoffTime = now - (maxBufferSeconds * 1000);
-                        while (frameBuffer.length > 0 && frameBuffer[0].timestamp < cutoffTime) {
-                            const removed = frameBuffer.shift();
-                            totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
-                        }
-
-                        const MAX_MEMORY_BYTES = 280 * 1024 * 1024;
-                        while (totalBufferBytes > MAX_MEMORY_BYTES && frameBuffer.length > 10) {
-                            const removed = frameBuffer.shift();
-                            totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
-                        }
-
-                        if (frameBuffer.length % 15 === 0) {
-                            updateBufferStats();
-                        }
-                    }, 'image/jpeg', preset.jpegQuality);
+                        storeFrame(now, blob);
+                    }, 'image/jpeg', CAPTURE.jpegQuality);
 
                 }, intervalMs);
             }
@@ -1296,18 +1455,26 @@
                     const newestTime = frameBuffer[frameBuffer.length - 1].timestamp;
                     const bufferedDurationSec = Math.max(0, (newestTime - oldestTime) / 1000);
 
-                    if (bufferedDurationSec < targetDelaySec) {
+                    // メモリ上限でこれ以上ためられない場合は、ためられた分だけ遅らせて再生する
+                    // （待ち画面のまま進まなくなるのを防ぐ）
+                    const cappedByMemory = memoryCapped && bufferedDurationSec < targetDelaySec;
+
+                    if (bufferedDurationSec < targetDelaySec && !cappedByMemory) {
                         bufferingOverlay.classList.remove('hidden');
                         const remaining = Math.max(0, targetDelaySec - bufferedDurationSec);
                         countdownSec.textContent = remaining.toFixed(1);
                         const progressPct = Math.min(100, (bufferedDurationSec / targetDelaySec) * 100);
                         bufferProgressBar.style.width = `${progressPct}%`;
+                        setCappedDelay(null);
                         return;
                     }
 
                     bufferingOverlay.classList.add('hidden');
 
-                    const virtualPlayheadTime = newestTime - (targetDelaySec * 1000);
+                    const effectiveDelaySec = cappedByMemory ? bufferedDurationSec : targetDelaySec;
+                    setCappedDelay(cappedByMemory ? Math.floor(bufferedDurationSec) : null);
+
+                    const virtualPlayheadTime = newestTime - (effectiveDelaySec * 1000);
 
                     let low = 0;
                     let high = frameBuffer.length - 1;
@@ -1333,7 +1500,7 @@
 
             // 遅延秒数の変更（1秒単位）
             function setDelaySeconds(sec) {
-                const maxAllowed = QUALITY_PRESETS[currentQuality].maxDelay;
+                const maxAllowed = MAX_DELAY_SEC;
                 const parsed = parseInt(sec, 10);
                 if (isNaN(parsed)) {
                     delayNumberInput.value = targetDelaySec;
@@ -1359,9 +1526,22 @@
                 });
             }
 
+            // メモリ上限で設定どおりの遅延がかけられないときの実際の遅延秒数（null = 設定どおり）
+            let cappedDelaySec = null;
+            function setCappedDelay(sec) {
+                if (sec === cappedDelaySec) return;
+                cappedDelaySec = sec;
+                updateStatusBadge();
+            }
+
             function updateStatusBadge() {
+                if (cappedDelaySec !== null) {
+                    statusBadge.textContent = `遅延再生: 約${cappedDelaySec}秒遅れ（メモリ上限）`;
+                    cleanModeText.textContent = `約${cappedDelaySec}秒遅れ • 画面タップで操作表示`;
+                } else {
                     statusBadge.textContent = `遅延再生: ${targetDelaySec}秒遅れ`;
                     cleanModeText.textContent = `${targetDelaySec}秒遅れ • 画面タップで操作表示`;
+                }
             }
 
             delaySlider.addEventListener('input', (e) => {
@@ -1464,26 +1644,74 @@
                 resetAutoHideTimer();
             });
 
-            // 画質切替ボタン
-            qualityBtns.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const selected = btn.dataset.quality;
-                    if (selected === currentQuality) return;
-                    currentQuality = selected;
-
-                    qualityBtns.forEach(b => {
-                        if (b.dataset.quality === currentQuality) {
-                            b.classList.remove('bg-navy-800', 'text-slate-300', 'border', 'border-navy-700');
-                            b.classList.add('bg-brand-orange', 'text-white');
-                        } else {
-                            b.classList.add('bg-navy-800', 'text-slate-300', 'border', 'border-navy-700');
-                            b.classList.remove('bg-brand-orange', 'text-white');
-                        }
-                    });
-
-                    setDelaySeconds(targetDelaySec);
-                    initCamera();
+            // 選択中ボタンの見た目を切り替える共通処理
+            function highlightButtons(buttons, isActive) {
+                buttons.forEach(b => {
+                    if (isActive(b)) {
+                        b.classList.remove('bg-navy-800', 'text-slate-300', 'border-navy-700');
+                        b.classList.add('bg-brand-orange', 'text-white', 'border-brand-orange');
+                    } else {
+                        b.classList.add('bg-navy-800', 'text-slate-300', 'border-navy-700');
+                        b.classList.remove('bg-brand-orange', 'text-white', 'border-brand-orange');
+                    }
                 });
+            }
+
+            // --- フレーム数（fps）選択 ---
+            // カメラが対応していないコマ数のボタンは押せないようにする
+            function updateFpsAvailability(mediaStream) {
+                let maxFps = 60;
+                try {
+                    const track = mediaStream && mediaStream.getVideoTracks()[0];
+                    const caps = track && typeof track.getCapabilities === 'function' ? track.getCapabilities() : null;
+                    if (caps && caps.frameRate && typeof caps.frameRate.max === 'number' && caps.frameRate.max > 0) {
+                        maxFps = caps.frameRate.max;
+                    }
+                } catch (_) {}
+                fpsBtns.forEach(b => {
+                    b.disabled = parseInt(b.dataset.fps, 10) > Math.round(maxFps);
+                });
+                // 選択中のコマ数が非対応なら、対応する最大の値に下げる
+                if (targetFps > Math.round(maxFps)) {
+                    const supported = FPS_OPTIONS.filter(f => f <= Math.round(maxFps));
+                    setTargetFps(supported.length ? supported[supported.length - 1] : FPS_OPTIONS[0]);
+                }
+            }
+
+            async function setTargetFps(fps) {
+                targetFps = fps;
+                highlightButtons(fpsBtns, b => parseInt(b.dataset.fps, 10) === targetFps);
+                if (!stream) return;
+                // カメラ側のコマ数も合わせる（映像はためたまま、撮り直しはしない）
+                const track = stream.getVideoTracks()[0];
+                if (track && typeof track.applyConstraints === 'function') {
+                    try {
+                        await track.applyConstraints({ frameRate: { ideal: targetFps } });
+                    } catch (_) {
+                        // 変更できないカメラでは、取り込み間隔だけで調整する
+                    }
+                }
+                startCaptureLoop();
+            }
+
+            fpsBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fps = parseInt(btn.dataset.fps, 10);
+                    if (fps !== targetFps && !btn.disabled) setTargetFps(fps);
+                });
+            });
+
+            // --- 表示方法（全画面 / 全体） ---
+            function setFitMode(mode) {
+                fitMode = mode;
+                playbackCanvas.classList.toggle('object-cover', fitMode === 'cover');
+                playbackCanvas.classList.toggle('object-contain', fitMode === 'contain');
+                highlightButtons(fitBtns, b => b.dataset.fit === fitMode);
+                applyViewTransform();
+            }
+
+            fitBtns.forEach(btn => {
+                btn.addEventListener('click', () => setFitMode(btn.dataset.fit));
             });
 
             // --- Screen Wake Lock API (画面スリープ防止) ---
@@ -1547,6 +1775,8 @@
             // アプリ起動時にカメラ初期化
             function boot() {
                 setDelaySeconds(10);
+                highlightButtons(fpsBtns, b => parseInt(b.dataset.fps, 10) === targetFps);
+                setFitMode('cover');
                 initCamera();
             }
             if (document.readyState === 'loading') {
