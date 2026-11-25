@@ -4,34 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>体操競技 遅延再生モニター (タイムシフトカメラ)</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Inter & Noto Sans JP -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        navy: {
-                            950: '#081426',
-                            900: '#0f2342',
-                            800: '#16325c',
-                            700: '#1e4278',
-                        },
-                        brand: {
-                            orange: '#ea580c',
-                            orangeHover: '#c2410c',
-                            amber: '#f59e0b',
-                        }
-                    },
-                    fontFamily: {
-                        sans: ['"Inter"', '"Noto Sans JP"', 'sans-serif'],
-                    }
-                }
-            }
-        }
-    </script>
+    <meta name="theme-color" content="#081426">
+    <!-- スタイル：Tailwind CSS をあらかじめ生成した同梱ファイル（外部CDN・Webフォントは使わず、通信なしでも表示できる）
+         生成方法は README の「スタイルの再生成」を参照 -->
+    <link rel="stylesheet" href="tailwind.css">
     <style>
         /* 横スクロール完全防止・全画面固定・タッチ操作最適化 */
         html, body {
@@ -374,6 +350,12 @@
             <span>バッファ: <strong id="bufferCountText" class="text-brand-orange">0</strong> フレーム</span>
             <span>メモリ使用量: <strong id="memoryUsageText" class="text-white">0.0 MB</strong></span>
         </div>
+
+        <!-- Androidアプリ版のダウンロード（アプリ内では非表示） -->
+        <a id="androidApkLink" href="https://github.com/ma2ryusk/delay_cam/releases/latest/download/delay_cam.apk"
+           class="block text-center text-xs font-bold text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl py-2">
+            Androidアプリ版をダウンロード（通信なしで動作）
+        </a>
     </div>
 
     <!-- リアルタイム小窓プレビュー（右上フローティングPiP：画角確認用） -->
@@ -2139,6 +2121,10 @@
 
             // アプリ起動時にカメラ初期化
             function boot() {
+                // Androidアプリ内で動いているときはダウンロード案内を出さない
+                if (location.hostname === 'appassets.androidplatform.net') {
+                    document.getElementById('androidApkLink').classList.add('hidden');
+                }
                 setDelaySeconds(10);
                 highlightButtons(fpsBtns, b => parseInt(b.dataset.fps, 10) === targetFps);
                 setFitMode('cover');

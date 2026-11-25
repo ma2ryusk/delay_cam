@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+// GitHub Actions のビルド番号をバージョン番号に使う（上書きインストールで更新できるように毎回増やす）
+def buildNumber = (project.findProperty('versionCode') ?: '1').toString().toInteger()
+
+android {
+    namespace 'io.github.ma2ryusk.delaycam'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.ma2ryusk.delaycam'
+        minSdk 26
+        targetSdk 34
+        versionCode buildNumber
+        versionName "1.0.${buildNumber}"
+    }
+
+    signingConfigs {
+        release {
+            // 署名鍵は GitHub の Secrets から復元される（リポジトリには含めない）
+            storeFile file('../release.p12')
+            storeType 'pkcs12'
+            storePassword System.getenv('KEYSTORE_PASSWORD')
+            keyAlias 'delaycam'
+            keyPassword System.getenv('KEYSTORE_PASSWORD')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

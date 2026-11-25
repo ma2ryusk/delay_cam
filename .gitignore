@@ -1,1 +1,16 @@
 .claude/
+
+# Android ビルド生成物
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+# ビルド時に Web アプリをコピーする場所（元ファイルはリポジトリ直下）
+android/app/src/main/assets/
+
+# アプリ署名鍵（絶対に公開しない。GitHub には Secrets として登録済み）
+android/release.p12
+android-signing/
+*.p12
+*.jks
+*.keystore

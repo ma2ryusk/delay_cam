@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<!-- アプリアイコンの元デザイン（README の「アイコンの再生成」参照） -->
+<style>
+  html, body { margin: 0; width: 512px; height: 512px; background: #081426; overflow: hidden; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" fill="#081426"/>
+  <!-- 時計の針（遅延） -->
+  <circle cx="256" cy="210" r="128" fill="none" stroke="#ea580c" stroke-width="30"/>
+  <path d="M256 210 V132" stroke="#ffffff" stroke-width="26" stroke-linecap="round"/>
+  <path d="M256 210 L312 246" stroke="#ffffff" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="256" cy="210" r="16" fill="#ffffff"/>
+  <!-- 巻き戻し矢印 -->
+  <path d="M128 210 L98 176 M128 210 L162 180" stroke="#f59e0b" stroke-width="26" stroke-linecap="round" fill="none"/>
+  <text x="256" y="462" text-anchor="middle" font-family="Yu Gothic UI, Meiryo, sans-serif" font-weight="900" font-size="72" fill="#ffffff" letter-spacing="6">遅延</text>
+</svg>
+</body>
+</html>
