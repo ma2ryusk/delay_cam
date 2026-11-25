@@ -4,26 +4,26 @@
 <meta charset="UTF-8">
 <title>体操競技 遅延再生モニター 説明書</title>
 <style>
-  @page { size: A4; margin: 14mm 15mm 12mm; }
+  @page { size: A4; margin: 11mm 14mm 9mm; }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: "Yu Gothic UI", "Yu Gothic", "Meiryo", sans-serif;
     color: #1a2433;
-    font-size: 10.5pt;
-    line-height: 1.6;
+    font-size: 10pt;
+    line-height: 1.5;
   }
   .head {
     display: flex;
     gap: 8mm;
     align-items: center;
     border-bottom: 2.5pt solid #ea580c;
-    padding-bottom: 5mm;
+    padding-bottom: 3.5mm;
   }
   .head .text { flex: 1; }
   h1 {
     margin: 0 0 1.5mm;
-    font-size: 21pt;
+    font-size: 19pt;
     line-height: 1.25;
     color: #0f2342;
     letter-spacing: 0.02em;
@@ -38,20 +38,24 @@
   }
   .qr { text-align: center; }
   .head a { color: inherit; text-decoration: none; }
-  .qr img { width: 38mm; height: 38mm; display: block; }
+  .apk { display: flex; gap: 6mm; align-items: center; }
+  .apk-text { flex: 1; }
+  .small-qr img { width: 24mm; height: 24mm; display: block; }
+  .small-qr span { font-size: 8pt; color: #4b5768; }
+  .qr img { width: 34mm; height: 34mm; display: block; }
   .qr span { font-size: 8.5pt; color: #4b5768; }
   h2 {
     font-size: 12.5pt;
     color: #0f2342;
-    margin: 5.5mm 0 2mm;
+    margin: 3.8mm 0 1.6mm;
     padding-left: 2.5mm;
     border-left: 4pt solid #ea580c;
     line-height: 1.3;
   }
   ol, ul { margin: 0; padding-left: 5.5mm; }
-  li { margin: 0.6mm 0; }
+  li { margin: 0.2mm 0; }
   table { width: 100%; border-collapse: collapse; font-size: 9.8pt; }
-  th, td { border-bottom: 0.6pt solid #d5dbe3; padding: 1.4mm 2mm; text-align: left; vertical-align: top; }
+  th, td { border-bottom: 0.6pt solid #d5dbe3; padding: 1mm 2mm; text-align: left; vertical-align: top; }
   th { width: 34%; color: #0f2342; white-space: nowrap; }
   .cols { display: flex; gap: 7mm; }
   .cols > div { flex: 1; }
@@ -59,7 +63,7 @@
     background: #fff4ec;
     border: 1pt solid #f7b98f;
     border-radius: 3mm;
-    padding: 3mm 4mm;
+    padding: 2.2mm 4mm;
     margin-top: 2mm;
   }
   .data table { font-size: 9.8pt; }
@@ -68,7 +72,7 @@
   .big { font-size: 11pt; font-weight: bold; color: #c2410c; margin: 0 0 1.5mm; }
   .small { font-size: 8.8pt; color: #4b5768; margin: 1.5mm 0 0; }
   .foot {
-    margin-top: 6mm;
+    margin-top: 3mm;
     border-top: 0.6pt solid #d5dbe3;
     padding-top: 2mm;
     text-align: right;
@@ -82,7 +86,7 @@
 <div class="head">
   <div class="text">
     <h1>体操競技 遅延再生モニター<br>かんたん説明書</h1>
-    <p class="lead">スマホ・iPad のカメラ映像を、決めた秒数だけ遅らせて流し続けるアプリです。演技のあとモニターの前に戻れば、自分の演技をすぐ確認できます。インストールは不要です。</p>
+    <p class="lead">スマホ・iPad のカメラ映像を、決めた秒数だけ遅らせて流し続けるアプリです。演技のあとモニターの前に戻れば、自分の演技をすぐ確認できます。ブラウザで開くだけで使えます（Android はアプリ版もあります）。</p>
     <div class="url"><a href="https://ma2ryusk.github.io/delay_cam/">https://ma2ryusk.github.io/delay_cam/</a></div>
   </div>
   <div class="qr">
@@ -93,7 +97,7 @@
 
 <h2>使い方</h2>
 <ol>
-  <li>QR コードを読み取るか、上の URL を開く（PDF をスマホで見ている場合は QR コードや URL をタップ）（iPhone・iPad は Safari、Android は Chrome）</li>
+  <li>QR コードを読み取るか URL を開く（PDF なら QR・URL をタップ。iPhone・iPad は Safari、Android は Chrome）</li>
   <li>「カメラの使用を許可しますか？」と聞かれたら <b>許可</b> を押す</li>
   <li>端末を三脚などに固定し、演技する場所に向ける</li>
   <li>設定した秒数（最初は 10 秒）がたまると、遅れた映像が全画面で流れ始める</li>
@@ -114,7 +118,7 @@
       <tr><th>右上の LIVE 小窓</th><td>今の映像（画角の確認用）</td></tr>
       <tr><th>🔄 ボタン</th><td>前面／背面カメラの切替</td></tr>
       <tr><th>歯車ボタン</th><td>コマ数・表示方法・左右反転など</td></tr>
-      <tr><th>フレーム数（歯車内）</th><td>15〜60コマ／秒。下げると長く遅延できる</td></tr>
+      <tr><th>フレーム数（歯車内）</th><td>15〜60コマ／秒（下げると長く遅延可）</td></tr>
     </table>
   </div>
 </div>
@@ -123,11 +127,27 @@
 <div class="data">
   <p class="big">通信するのは「ページを開くとき」だけ。撮影中・再生中の通信量は 0 です。</p>
   <table>
-    <tr><th>初めて開くとき</th><td class="num">約 1〜2.5 MB</td><td>アプリ本体（約 20 KB）、画面デザイン用の部品（約 130 KB）、文字のフォント（最大 約 2 MB）</td></tr>
-    <tr><th>2回目以降に開くとき</th><td class="num">ごくわずか</td><td>多くはブラウザに保存された分を使うため、初回より大幅に少なくなります</td></tr>
-    <tr><th>撮影・遅延再生中</th><td class="num">0 MB</td><td>映像は端末の中だけで処理し、インターネットには送りません。何時間使っても通信量は増えません</td></tr>
+    <tr><th>ブラウザで開くとき</th><td class="num">約 30 KB</td><td>アプリ本体と画面デザインだけ。2回目以降はさらに少なくなります</td></tr>
+    <tr><th>Androidアプリ版</th><td class="num">約 0.4 MB</td><td>ダウンロードするときの1回だけ。インストール後は通信しません</td></tr>
+    <tr><th>撮影・遅延再生中</th><td class="num">0 MB</td><td>映像は端末の中だけで処理。何時間使っても通信量は増えません</td></tr>
   </table>
   <p class="small">※ 数値は実際の配信ファイルを測った目安です。端末やブラウザによって多少変わります。</p>
+</div>
+
+<h2>Android アプリ版（通信なしで動く）</h2>
+<div class="apk">
+  <div class="apk-text">
+    <ol>
+      <li>右の QR コードを読み取る（またはタップ）と <b>delay_cam.apk</b> がダウンロードされる</li>
+      <li>ダウンロードしたファイルを開き、「この提供元のアプリを許可」を求められたら許可して「インストール」</li>
+      <li>ホーム画面の「遅延再生モニター」を開き、カメラを許可する</li>
+    </ol>
+    <p class="small">Google Play を通さない配布のため、確認画面が出ます。アプリはインターネットに接続しません。</p>
+  </div>
+  <div class="qr small-qr">
+    <a href="https://github.com/ma2ryusk/delay_cam/releases/latest/download/delay_cam.apk"><img src="../qr-android.png" alt="AndroidアプリのQRコード"></a>
+    <span>APK をダウンロード</span>
+  </div>
 </div>
 
 <h2>注意</h2>
