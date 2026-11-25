@@ -314,7 +314,7 @@
         <div class="space-y-1.5">
             <div class="flex items-center justify-between">
                 <p class="font-bold text-xs text-slate-300">フレーム数（1秒あたりのコマ数）</p>
-                <span class="text-[11px] text-slate-400">実測 <strong id="actualFpsText" class="text-white tabular-nums">-</strong> fps</span>
+                <span class="text-[11px] text-slate-400">カメラ <strong id="cameraFpsText" class="text-white tabular-nums">-</strong> / 実測 <strong id="actualFpsText" class="text-white tabular-nums">-</strong> fps</span>
             </div>
             <div class="grid grid-cols-4 gap-2">
                 <button type="button" data-fps="15" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">15</button>
@@ -322,7 +322,8 @@
                 <button type="button" data-fps="30" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">30</button>
                 <button type="button" data-fps="60" class="fps-btn py-2 rounded-xl font-bold text-xs bg-navy-800 text-slate-300 border border-navy-700 disabled:opacity-35">60</button>
             </div>
-            <p class="text-[11px] text-slate-400">※ コマ数を上げると動きがなめらかになりますが、長い遅延はかけにくくなります。端末の性能を超える分は自動で間引かれます。</p>
+            <p id="cameraFpsNote" class="hidden text-[11px] text-amber-300">※ この端末・ブラウザのカメラは選んだコマ数を出せないため、カメラが出せる最大のコマ数で撮影しています。</p>
+            <p class="text-[11px] text-slate-400">※ コマ数を上げると動きがなめらかになりますが、長い遅延はかけにくくなります。60fpsではカメラによって画質が720pになります。</p>
         </div>
 
         <!-- 表示方法 -->
@@ -343,6 +344,7 @@
             <span>カメラ解像度: <strong id="cameraResText" class="text-white tabular-nums">-</strong></span>
             <span>遅延できる最大: <strong id="maxDelayText" class="text-brand-orange tabular-nums">-</strong></span>
         </div>
+        <p class="text-[11px] text-slate-400 -mt-1.5 px-1">圧縮方式: <strong id="captureModeText" class="text-white">-</strong></p>
 
         <!-- 便利オプション群 -->
         <div class="grid grid-cols-2 gap-2 pt-1">
@@ -524,6 +526,9 @@
             const fpsBtns = document.querySelectorAll('.fps-btn');
             const fitBtns = document.querySelectorAll('.fit-btn');
             const actualFpsText = document.getElementById('actualFpsText');
+            const cameraFpsText = document.getElementById('cameraFpsText');
+            const cameraFpsNote = document.getElementById('cameraFpsNote');
+            const captureModeText = document.getElementById('captureModeText');
             const cameraResText = document.getElementById('cameraResText');
             const maxDelayText = document.getElementById('maxDelayText');
             const bufferCountText = document.getElementById('bufferCountText');
@@ -1024,6 +1029,10 @@
                 lastDrawnFrameTimestamp = 0;
                 pendingDrawFrame = null;
                 memoryCapped = false;
+                // 動画方式：クリア前に撮ったコマは捨て、次のコマはキーフレームから始める
+                encodeAcceptAfterUs = performance.now() * 1000;
+                forceKeyFrame = true;
+                resetVideoDecoder();
                 updateBufferStats();
             }
 
@@ -1064,6 +1073,7 @@
                 hideError();
                 streamInterruptedOverlay.classList.add('hidden');
                 stopCaptureLoop();
+                closeVideoEncoder();
                 clearBuffer();
 
                 if (stream) {
@@ -1136,6 +1146,14 @@
                     } else if (facingMode === 'environment' && isMirrored) {
                         toggleMirror(false);
                     }
+
+                    // 60fpsを選んでいる場合は、カメラが60fpsを出せる解像度に合わせる
+                    if (targetFps >= 50) await negotiateCameraFps();
+                    if (currentSession !== cameraSessionId) return;
+
+                    // 圧縮方式（動画 / JPEG）を決める
+                    await setupCaptureMode();
+                    if (currentSession !== cameraSessionId) return;
 
                     startCaptureLoop();
                     startRenderLoop();
@@ -1250,7 +1268,7 @@
                             const job = encoderJobs.get(e.data.id);
                             encoderJobs.delete(e.data.id);
                             if (job && e.data.blob && job.gen === bufferGeneration) {
-                                storeFrame(job.timestamp, e.data.blob);
+                                storeFrame({ timestamp: job.timestamp, blob: e.data.blob, size: e.data.blob.size, key: true });
                             }
                         };
                         entry.worker.onerror = () => {
@@ -1265,15 +1283,15 @@
                 }
             }
 
-            // 圧縮済みのコマをバッファに追加（並列圧縮で順番が前後しても時刻順に並べる）
+            // 撮ったコマをバッファに追加（並列圧縮で順番が前後しても時刻順に並べる）
+            // frame = { timestamp(ms), size, key(このコマから再生を始められるか), blob(JPEG方式) | data・cfg(動画方式) }
             const maxBufferSeconds = MAX_DELAY_SEC + 5;
             let lastStatsUpdate = 0;
-            function storeFrame(timestamp, blob) {
-                const frame = { timestamp, blob, size: blob.size };
+            function storeFrame(frame) {
                 let i = frameBuffer.length;
-                while (i > 0 && frameBuffer[i - 1].timestamp > timestamp) i--;
+                while (i > 0 && frameBuffer[i - 1].timestamp > frame.timestamp) i--;
                 frameBuffer.splice(i, 0, frame);
-                totalBufferBytes += blob.size;
+                totalBufferBytes += frame.size;
 
                 const newest = frameBuffer[frameBuffer.length - 1].timestamp;
                 const cutoffTime = newest - (maxBufferSeconds * 1000);
@@ -1283,6 +1301,11 @@
                 }
 
                 while (totalBufferBytes > MAX_MEMORY_BYTES && frameBuffer.length > 10) {
+                    const removed = frameBuffer.shift();
+                    totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
+                }
+                // 動画方式では先頭は必ずキーフレーム（単独で再生できるコマ）にそろえる
+                while (frameBuffer.length > 0 && !frameBuffer[0].key) {
                     const removed = frameBuffer.shift();
                     totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
                 }
@@ -1297,66 +1320,385 @@
                 }
             }
 
-            // --- フレームキャプチャループ（リングバッファ蓄積・バックプレッシャー制御） ---
+            // =====================================================================
+            // 動画方式（WebCodecs）：端末の動画エンコーダー（多くはハードウェア）で圧縮する。
+            // 1コマずつJPEGにする方式より圧縮がはるかに軽く、60fpsでもコマ落ちしにくい。
+            // さらにデータ量も数分の1になるため、同じメモリでより長い遅延をかけられる。
+            // 非対応の端末では自動でJPEG方式に切り替える。
+            // =====================================================================
+            const CODEC_CANDIDATES = [
+                'avc1.64002A', // H.264 High   Level 4.2（1080p60まで）
+                'avc1.4D402A', // H.264 Main   Level 4.2
+                'avc1.42E02A', // H.264 Baseline Level 4.2
+                'vp8'
+            ];
+            let captureMode = 'jpeg';      // 'codec' | 'jpeg'
+            let codecDisabled = false;     // 動画方式でエラーが続いた場合はJPEG方式に固定
+            let codecErrorCount = 0;
+            let videoEncoder = null;
+            let encoderCfg = null;         // 現在のエンコーダー設定（コマごとに参照を保存）
+            let encoderCfgSeq = 0;
+            let encoderReconfiguring = false;
+            let forceKeyFrame = true;
+            let lastKeyFrameTime = 0;
+            let encodeAcceptAfterUs = 0;   // バッファクリア以前に撮ったコマの出力は捨てる
+
+            function codecApiAvailable() {
+                return !codecDisabled &&
+                    typeof VideoEncoder === 'function' && typeof VideoDecoder === 'function' &&
+                    typeof VideoFrame === 'function' && typeof EncodedVideoChunk === 'function';
+            }
+
+            function codecBitrate(w, h, fps) {
+                return Math.round(Math.max(2e6, Math.min(16e6, w * h * fps * 0.12)));
+            }
+
+            async function pickEncoderConfig(w, h, fps) {
+                for (const codec of CODEC_CANDIDATES) {
+                    const cfg = {
+                        codec,
+                        width: w,
+                        height: h,
+                        framerate: fps,
+                        bitrate: codecBitrate(w, h, fps),
+                        latencyMode: 'realtime'
+                    };
+                    if (codec.startsWith('avc1')) cfg.avc = { format: 'annexb' };
+                    try {
+                        const enc = await VideoEncoder.isConfigSupported(cfg);
+                        if (!enc || !enc.supported) continue;
+                        const dec = await VideoDecoder.isConfigSupported({ codec, codedWidth: w, codedHeight: h });
+                        if (!dec || !dec.supported) continue;
+                        return cfg;
+                    } catch (_) { /* 次の候補へ */ }
+                }
+                return null;
+            }
+
+            function closeVideoEncoder() {
+                encoderCfgSeq++;
+                if (videoEncoder) {
+                    try { videoEncoder.close(); } catch (_) {}
+                }
+                videoEncoder = null;
+                encoderCfg = null;
+            }
+
+            function handleCodecError() {
+                codecErrorCount++;
+                if (codecErrorCount >= 3) {
+                    // 動画方式が安定しない端末ではJPEG方式に切り替えて撮り直す
+                    codecDisabled = true;
+                    closeVideoEncoder();
+                    resetVideoDecoder();
+                    captureMode = 'jpeg';
+                    updateCaptureModeText();
+                    clearBuffer();
+                    startCaptureLoop();
+                }
+            }
+
+            // エンコーダーを（再）設定。成功すれば true
+            async function setupVideoEncoder() {
+                const w = (video.videoWidth || 0) & ~1;   // H.264は偶数サイズが必要
+                const h = (video.videoHeight || 0) & ~1;
+                if (!w || !h || !codecApiAvailable()) return false;
+                const cfg = await pickEncoderConfig(w, h, targetFps);
+                if (!cfg) return false;
+
+                closeVideoEncoder();
+                const myId = encoderCfgSeq;
+                const cfgRef = cfg;
+                try {
+                    videoEncoder = new VideoEncoder({
+                        output: (chunk) => {
+                            if (myId !== encoderCfgSeq) return;
+                            if (chunk.timestamp < encodeAcceptAfterUs) return;
+                            const data = new Uint8Array(chunk.byteLength);
+                            chunk.copyTo(data);
+                            storeFrame({
+                                timestamp: chunk.timestamp / 1000,
+                                size: chunk.byteLength,
+                                key: chunk.type === 'key',
+                                data,
+                                cfg: cfgRef
+                            });
+                        },
+                        error: () => {
+                            if (myId !== encoderCfgSeq) return;
+                            handleCodecError();
+                        }
+                    });
+                    videoEncoder.configure(cfg);
+                } catch (_) {
+                    closeVideoEncoder();
+                    return false;
+                }
+                encoderCfg = cfgRef;
+                forceKeyFrame = true;
+                return true;
+            }
+
+            // カメラ起動・コマ数変更時に、使う圧縮方式を決める
+            async function setupCaptureMode() {
+                const ok = await setupVideoEncoder();
+                captureMode = ok ? 'codec' : 'jpeg';
+                updateCaptureModeText();
+            }
+
+            function updateCaptureModeText() {
+                if (!captureModeText) return;
+                if (captureMode === 'codec' && encoderCfg) {
+                    captureModeText.textContent = encoderCfg.codec.startsWith('avc1') ? '動画 (H.264)' : '動画 (VP8)';
+                } else {
+                    captureModeText.textContent = '画像 (JPEG)';
+                }
+            }
+
+            function encodeVideoFrame(now) {
+                if (!videoEncoder || videoEncoder.state !== 'configured' || !encoderCfg) return false;
+
+                // 画面回転などでカメラの縦横が変わったらエンコーダーを作り直す
+                const w = video.videoWidth & ~1;
+                const h = video.videoHeight & ~1;
+                if (w !== encoderCfg.width || h !== encoderCfg.height) {
+                    if (!encoderReconfiguring) {
+                        encoderReconfiguring = true;
+                        setupVideoEncoder().then((ok) => {
+                            encoderReconfiguring = false;
+                            if (!ok) {
+                                captureMode = 'jpeg';
+                                updateCaptureModeText();
+                            }
+                        });
+                    }
+                    return false;
+                }
+
+                // 圧縮待ちがたまっている（端末の処理が追いつかない）ときはこのコマを見送る
+                if (videoEncoder.encodeQueueSize > 4) return false;
+
+                const keyFrame = forceKeyFrame || (now - lastKeyFrameTime >= 1000); // 約1秒ごとにキーフレーム
+                let frame = null;
+                try {
+                    frame = new VideoFrame(video, { timestamp: Math.round(now * 1000) });
+                    videoEncoder.encode(frame, { keyFrame });
+                } catch (_) {
+                    if (frame) frame.close();
+                    return false;
+                }
+                frame.close();
+                if (keyFrame) {
+                    lastKeyFrameTime = now;
+                    forceKeyFrame = false;
+                }
+                return true;
+            }
+
+            // --- 動画方式の再生（遅延位置のコマまで順番にデコードして表示） ---
+            let videoDecoder = null;
+            let decoderCfg = null;
+            let decoderSeq = 0;
+            let fedUntilTs = -1;           // デコーダーに渡した最後のコマの時刻
+            let decodedFrame = null;       // 表示待ちの最新デコード結果（VideoFrame）
+
+            function resetVideoDecoder() {
+                decoderSeq++;
+                if (videoDecoder) {
+                    try { videoDecoder.close(); } catch (_) {}
+                }
+                videoDecoder = null;
+                decoderCfg = null;
+                fedUntilTs = -1;
+                if (decodedFrame) {
+                    decodedFrame.close();
+                    decodedFrame = null;
+                }
+            }
+
+            function ensureVideoDecoder(cfg) {
+                if (!videoDecoder) {
+                    const myId = decoderSeq;
+                    videoDecoder = new VideoDecoder({
+                        output: (frame) => {
+                            if (myId !== decoderSeq) {
+                                frame.close();
+                                return;
+                            }
+                            // 追いつき中にまとめて出てきたコマは最新の1枚だけ残す
+                            if (decodedFrame) decodedFrame.close();
+                            decodedFrame = frame;
+                        },
+                        error: () => {
+                            if (myId !== decoderSeq) return;
+                            resetVideoDecoder();
+                            handleCodecError();
+                        }
+                    });
+                }
+                if (decoderCfg !== cfg) {
+                    videoDecoder.configure({ codec: cfg.codec, codedWidth: cfg.width, codedHeight: cfg.height, optimizeForLatency: true });
+                    decoderCfg = cfg;
+                }
+            }
+
+            function playCodecUntil(bestIdx) {
+                const target = frameBuffer[bestIdx];
+                if (!target || !target.data) return;
+
+                // 次に渡すコマの位置を決める。遅延秒数の変更などで再生位置が飛んだ場合は、
+                // 直前のキーフレームからデコードし直す
+                let start = -1;
+                const firstTs = frameBuffer[0].timestamp;
+                const jumped = fedUntilTs < 0 || fedUntilTs < firstTs ||
+                    target.timestamp < fedUntilTs || target.timestamp - fedUntilTs > 1500;
+                if (jumped) {
+                    // 動画方式のキーフレーム（JPEG方式のコマは除く）までさかのぼる
+                    const isCodecKey = (f) => f.key && f.data;
+                    let k = bestIdx;
+                    while (k > 0 && !isCodecKey(frameBuffer[k])) k--;
+                    if (!isCodecKey(frameBuffer[k])) return;
+                    resetVideoDecoder();
+                    start = k;
+                } else {
+                    let lo = 0, hi = frameBuffer.length - 1;
+                    start = frameBuffer.length;
+                    while (lo <= hi) {
+                        const mid = (lo + hi) >> 1;
+                        if (frameBuffer[mid].timestamp > fedUntilTs) {
+                            start = mid;
+                            hi = mid - 1;
+                        } else {
+                            lo = mid + 1;
+                        }
+                    }
+                }
+
+                try {
+                    for (let i = start; i <= bestIdx; i++) {
+                        if (videoDecoder && videoDecoder.decodeQueueSize > 8) break; // デコード待ちが多いときは次の描画で続き
+                        const f = frameBuffer[i];
+                        if (!f.data) continue;
+                        ensureVideoDecoder(f.cfg);
+                        videoDecoder.decode(new EncodedVideoChunk({
+                            type: f.key ? 'key' : 'delta',
+                            timestamp: Math.round(f.timestamp * 1000),
+                            data: f.data
+                        }));
+                        fedUntilTs = f.timestamp;
+                    }
+                } catch (_) {
+                    resetVideoDecoder();
+                    handleCodecError();
+                    return;
+                }
+
+                // デコード済みの最新コマを表示
+                if (decodedFrame) {
+                    const frame = decodedFrame;
+                    decodedFrame = null;
+                    fitPlaybackCanvasTo(frame.displayWidth, frame.displayHeight);
+                    playbackCtx.drawImage(frame, 0, 0, playbackCanvas.width, playbackCanvas.height);
+                    frame.close();
+                }
+            }
+
+            // =====================================================================
+            // フレームキャプチャループ
+            // カメラの新しいコマが来るたび（requestVideoFrameCallback）に取り込み、
+            // 選んだコマ数になるよう間引く。非対応ブラウザでは一定間隔のタイマーで取り込む。
+            // =====================================================================
+            let captureLoopId = 0;
+            let lastCaptureTime = 0;
+            let lastVideoFrameCbTime = 0;
+
+            function captureTick() {
+                if (!stream || video.readyState < 2) return;
+
+                const activeTrack = stream.getVideoTracks()[0];
+                if (activeTrack && activeTrack.readyState === 'ended') {
+                    streamInterruptedOverlay.classList.remove('hidden');
+                    return;
+                }
+
+                const now = performance.now();
+                // 選んだコマ数より速く来たコマは間引く（少し余裕を持たせて判定）
+                if (now - lastCaptureTime < 1000 / targetFps - 4) return;
+
+                if (video.videoWidth && (video.videoWidth !== captureCanvas.width || video.videoHeight !== captureCanvas.height)) {
+                    syncCanvasDimensions();
+                }
+
+                // リアルタイム小窓（PiP）の描画は表示中のみ更新
+                if (isPipVisible) {
+                    livePipCtx.drawImage(video, 0, 0, livePipCanvas.width, livePipCanvas.height);
+                }
+
+                // 動画方式
+                if (captureMode === 'codec') {
+                    if (encodeVideoFrame(now)) lastCaptureTime = now;
+                    return;
+                }
+
+                const genAtCapture = bufferGeneration;
+
+                // JPEG方式1：並列ワーカーで圧縮（空いているワーカーが無ければこのコマは見送る）
+                if (canUseEncoderPool() && encoderPool.length > 0) {
+                    const free = encoderPool.find(e => !e.busy);
+                    if (!free) return;
+                    free.busy = true;
+                    lastCaptureTime = now;
+                    createImageBitmap(video).then((bmp) => {
+                        const id = ++encoderJobSeq;
+                        encoderJobs.set(id, { timestamp: now, gen: genAtCapture });
+                        free.worker.postMessage({ id, bmp, quality: CAPTURE.jpegQuality }, [bmp]);
+                    }).catch(() => {
+                        free.busy = false;
+                    });
+                    return;
+                }
+
+                // JPEG方式2（ワーカー非対応端末）：1コマずつ圧縮
+                // エンコード中（isCapturingBlob）はスキップしてメモリ詰まり・コールバック滞留を防止
+                if (isCapturingBlob) return;
+                isCapturingBlob = true;
+                lastCaptureTime = now;
+                captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+
+                captureCanvas.toBlob((blob) => {
+                    isCapturingBlob = false;
+                    // バッファリセット後・無効Blobは即破棄
+                    if (!blob || genAtCapture !== bufferGeneration) return;
+                    storeFrame({ timestamp: now, blob, size: blob.size, key: true });
+                }, 'image/jpeg', CAPTURE.jpegQuality);
+            }
+
             function startCaptureLoop() {
                 stopCaptureLoop();
-                ensureEncoderPool();
-                const intervalMs = Math.max(10, Math.round(1000 / targetFps));
+                if (captureMode === 'jpeg') ensureEncoderPool();
+                const loopId = captureLoopId;
+                lastCaptureTime = 0;
+                lastVideoFrameCbTime = 0;
 
+                // カメラの新しいコマごとに呼ばれる（同じコマを二重に取り込まない）
+                if (typeof video.requestVideoFrameCallback === 'function') {
+                    const onVideoFrame = () => {
+                        if (loopId !== captureLoopId) return;
+                        lastVideoFrameCbTime = performance.now();
+                        video.requestVideoFrameCallback(onVideoFrame);
+                        captureTick();
+                    };
+                    video.requestVideoFrameCallback(onVideoFrame);
+                }
+
+                // 予備：上の仕組みが無い・動いていないときはタイマーで取り込む
                 captureTimerId = setInterval(() => {
-                    if (!stream || video.readyState < 2) return;
-
-                    const activeTrack = stream.getVideoTracks()[0];
-                    if (activeTrack && activeTrack.readyState === 'ended') {
-                        streamInterruptedOverlay.classList.remove('hidden');
-                        return;
-                    }
-
-                    if (video.videoWidth && (video.videoWidth !== captureCanvas.width || video.videoHeight !== captureCanvas.height)) {
-                        syncCanvasDimensions();
-                    }
-
-                    const now = performance.now();
-
-                    // リアルタイム小窓（PiP）の描画は表示中のみ更新
-                    if (isPipVisible) {
-                        livePipCtx.drawImage(video, 0, 0, livePipCanvas.width, livePipCanvas.height);
-                    }
-
-                    const genAtCapture = bufferGeneration;
-
-                    // 方式1：並列ワーカーで圧縮（空いているワーカーが無ければこのコマは見送る）
-                    if (canUseEncoderPool() && encoderPool.length > 0) {
-                        const free = encoderPool.find(e => !e.busy);
-                        if (!free) return;
-                        free.busy = true;
-                        createImageBitmap(video).then((bmp) => {
-                            const id = ++encoderJobSeq;
-                            encoderJobs.set(id, { timestamp: now, gen: genAtCapture });
-                            free.worker.postMessage({ id, bmp, quality: CAPTURE.jpegQuality }, [bmp]);
-                        }).catch(() => {
-                            free.busy = false;
-                        });
-                        return;
-                    }
-
-                    // 方式2（ワーカー非対応端末）：従来どおり1コマずつ圧縮
-                    // エンコード中（isCapturingBlob）はスキップしてメモリ詰まり・コールバック滞留を防止
-                    if (isCapturingBlob) return;
-                    isCapturingBlob = true;
-                    captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-
-                    captureCanvas.toBlob((blob) => {
-                        isCapturingBlob = false;
-                        // バッファリセット後・無効Blobは即破棄
-                        if (!blob || genAtCapture !== bufferGeneration) return;
-                        storeFrame(now, blob);
-                    }, 'image/jpeg', CAPTURE.jpegQuality);
-
-                }, intervalMs);
+                    if (performance.now() - lastVideoFrameCbTime > 250) captureTick();
+                }, Math.max(8, Math.round(1000 / targetFps / 2)));
             }
 
             function stopCaptureLoop() {
+                captureLoopId++;
                 if (captureTimerId) {
                     clearInterval(captureTimerId);
                     captureTimerId = null;
@@ -1490,7 +1832,11 @@
                         }
                     }
 
-                    drawFrameToPlayback(frameBuffer[bestIdx]);
+                    if (frameBuffer[bestIdx].data) {
+                        playCodecUntil(bestIdx);       // 動画方式
+                    } else {
+                        drawFrameToPlayback(frameBuffer[bestIdx]); // JPEG方式
+                    }
                 }
 
                 renderAnimId = requestAnimationFrame(render);
@@ -1658,24 +2004,48 @@
             }
 
             // --- フレーム数（fps）選択 ---
-            // カメラが対応していないコマ数のボタンは押せないようにする
+            // カメラが実際に出しているコマ数を表示する
+            // （ボタンは無効化しない：ブラウザが申告する上限は実際より低いことがあるため、試せるようにする）
             function updateFpsAvailability(mediaStream) {
-                let maxFps = 60;
+                updateCameraFpsText(mediaStream);
+            }
+
+            function updateCameraFpsText(mediaStream = stream) {
+                let fr = 0;
                 try {
                     const track = mediaStream && mediaStream.getVideoTracks()[0];
-                    const caps = track && typeof track.getCapabilities === 'function' ? track.getCapabilities() : null;
-                    if (caps && caps.frameRate && typeof caps.frameRate.max === 'number' && caps.frameRate.max > 0) {
-                        maxFps = caps.frameRate.max;
-                    }
+                    const s = track && typeof track.getSettings === 'function' ? track.getSettings() : null;
+                    fr = s && s.frameRate ? s.frameRate : 0;
                 } catch (_) {}
-                fpsBtns.forEach(b => {
-                    b.disabled = parseInt(b.dataset.fps, 10) > Math.round(maxFps);
-                });
-                // 選択中のコマ数が非対応なら、対応する最大の値に下げる
-                if (targetFps > Math.round(maxFps)) {
-                    const supported = FPS_OPTIONS.filter(f => f <= Math.round(maxFps));
-                    setTargetFps(supported.length ? supported[supported.length - 1] : FPS_OPTIONS[0]);
+                cameraFpsText.textContent = fr ? Math.round(fr) : '-';
+                const short = fr && fr < targetFps - 5;
+                cameraFpsNote.classList.toggle('hidden', !short);
+            }
+
+            // カメラに選んだコマ数を出してもらう。
+            // 60fpsはフルHDでは出せないカメラが多いため、出なければ720pに下げて再挑戦する
+            async function negotiateCameraFps() {
+                const track = stream && stream.getVideoTracks()[0];
+                if (!track || typeof track.applyConstraints !== 'function') return;
+                const attempts = [
+                    { width: { ideal: CAPTURE.idealWidth }, height: { ideal: CAPTURE.idealHeight }, frameRate: { ideal: targetFps } }
+                ];
+                if (targetFps >= 50) {
+                    attempts.push(
+                        { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: targetFps } },
+                        { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { min: 50, ideal: targetFps } }
+                    );
                 }
+                for (const c of attempts) {
+                    try {
+                        await track.applyConstraints(c);
+                    } catch (_) {
+                        continue;
+                    }
+                    const s = typeof track.getSettings === 'function' ? track.getSettings() : {};
+                    if ((s.frameRate || 0) >= targetFps - 5) break;
+                }
+                updateCameraFpsText();
             }
 
             async function setTargetFps(fps) {
@@ -1683,21 +2053,16 @@
                 highlightButtons(fpsBtns, b => parseInt(b.dataset.fps, 10) === targetFps);
                 if (!stream) return;
                 // カメラ側のコマ数も合わせる（映像はためたまま、撮り直しはしない）
-                const track = stream.getVideoTracks()[0];
-                if (track && typeof track.applyConstraints === 'function') {
-                    try {
-                        await track.applyConstraints({ frameRate: { ideal: targetFps } });
-                    } catch (_) {
-                        // 変更できないカメラでは、取り込み間隔だけで調整する
-                    }
-                }
+                await negotiateCameraFps();
+                // 動画方式はコマ数に合わせてエンコーダーを設定し直す
+                if (codecApiAvailable()) await setupCaptureMode();
                 startCaptureLoop();
             }
 
             fpsBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
                     const fps = parseInt(btn.dataset.fps, 10);
-                    if (fps !== targetFps && !btn.disabled) setTargetFps(fps);
+                    if (fps !== targetFps) setTargetFps(fps);
                 });
             });
 
