@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>体操競技 遅延再生モニター (タイムシフトカメラ)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Noto Sans JP -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        navy: {
+                            950: '#081426',
+                            900: '#0f2342',
+                            800: '#16325c',
+                            700: '#1e4278',
+                        },
+                        brand: {
+                            orange: '#ea580c',
+                            orangeHover: '#c2410c',
+                            amber: '#f59e0b',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['"Inter"', '"Noto Sans JP"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 横スクロール完全防止・全画面固定・タッチ操作最適化 */
+        html, body {
+            overflow: hidden;
+            width: 100vw;
+            height: 100dvh;
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            color: #ffffff;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* セーフエリア（ノッチ・ホームバー）対応パディング */
+        .safe-top {
+            padding-top: max(0.625rem, env(safe-area-inset-top));
+            padding-left: max(0.625rem, env(safe-area-inset-left));
+            padding-right: max(0.625rem, env(safe-area-inset-right));
+        }
+        .safe-bottom {
+            padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+            padding-left: max(0.5rem, env(safe-area-inset-left));
+            padding-right: max(0.5rem, env(safe-area-inset-right));
+        }
+        .safe-left {
+            left: max(0.625rem, env(safe-area-inset-left));
+        }
+
+        /* HUDのフェード・スライドアニメーション */
+        .hud-top {
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+        }
+        .hud-bottom {
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+        }
+        .hud-hidden .hud-top {
+            transform: translateY(-110%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .hud-hidden .hud-bottom {
+            transform: translateY(110%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .hud-hidden .hud-pip {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .hud-hidden .hud-zoom {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* 横画面（ランドスケープ）時の下部コントロール最適化 */
+        @media (orientation: landscape) and (max-height: 600px) {
+            .hud-bottom-inner {
+                max-width: 760px;
+                padding: 0.45rem 0.75rem !important;
+                gap: 0.4rem !important;
+            }
+            .landscape-row {
+                flex-direction: row !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 0.5rem !important;
+            }
+        }
+
+        /* 左右反転（鏡像） */
+        .mirror-x {
+            transform: scaleX(-1);
+        }
+
+        /* Tailwind標準に無いユーティリティの補完 */
+        .z-25 { z-index: 25; }
+
+        /* スライダー（range）共通スタイル */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 28px;
+            background: transparent;
+            touch-action: none;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 6px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        input[type="range"]::-moz-range-track {
+            height: 6px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            margin-top: -8px;
+            border-radius: 9999px;
+            background: #ea580c;
+            border: 3px solid #ffffff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 9999px;
+            background: #ea580c;
+            border: 3px solid #ffffff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 数値入力のスピンボタン非表示 */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            -webkit-user-select: text;
+            user-select: text;
+        }
+
+        /* カメラ入力用Video：display:none だと一部ブラウザ(iOS Safari等)でフレーム更新が止まるため画面外に極小配置 */
+        .offscreen-video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body id="appRoot">
+    <!-- 非表示のカメラ入力用Videoとキャプチャ用Canvas -->
+    <video id="cameraVideo" autoplay playsinline muted class="offscreen-video"></video>
+    <canvas id="captureCanvas" class="hidden"></canvas>
+
+    <!-- 全画面遅延再生ステージ (100vw x 100dvh) -->
+    <main id="videoStage" class="fixed inset-0 w-screen h-[100dvh] bg-black flex items-center justify-center z-0 cursor-pointer overflow-hidden">
+        <!-- ズーム・パン変換レイヤー -->
+        <div id="zoomTransformLayer" class="w-full h-full flex items-center justify-center pointer-events-none">
+            <!-- 遅延再生メインCanvas（全体が欠けないようアスペクト比維持最大化） -->
+            <canvas id="playbackCanvas" class="w-full h-full object-contain pointer-events-none"></canvas>
+        </div>
+
+        <!-- UI非表示モード中のミニマル復帰バッジ -->
+        <div id="cleanModePill" style="top: max(0.75rem, env(safe-area-inset-top)); left: max(0.75rem, env(safe-area-inset-left));" class="hidden fixed z-20 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-xs font-bold text-white/90 pointer-events-none flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-brand-orange animate-pulse"></span>
+            <span id="cleanModeText">10秒遅れ • 画面タップで操作表示</span>
+        </div>
+
+        <!-- バッファ蓄積中オーバーレイ（遅延時間に達するまでのカウントダウン） -->
+        <div id="bufferingOverlay" class="fixed inset-0 bg-navy-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-10 pointer-events-none">
+            <div class="w-11 h-11 sm:w-14 sm:h-14 border-4 border-navy-700 border-t-brand-orange rounded-full animate-spin mb-3"></div>
+            <p class="text-lg sm:text-2xl font-black text-white tracking-tight drop-shadow">
+                あと <span id="countdownSec" class="text-3xl sm:text-5xl text-brand-orange mx-1">10.0</span> 秒で遅延映像を全画面表示します
+            </p>
+            <p class="text-xs sm:text-sm text-slate-300 mt-1.5">映像をバッファリング中... 小窓で現在の画角を確認できます</p>
+            <!-- プログレスバー -->
+            <div class="w-full max-w-xs h-2.5 bg-navy-800/90 rounded-full overflow-hidden mt-3.5 border border-navy-700">
+                <div id="bufferProgressBar" class="h-full bg-brand-orange transition-all duration-150" style="width: 0%;"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- カメラ中断・バックグラウンド復帰用オーバーレイ -->
+    <div id="streamInterruptedOverlay" class="hidden fixed inset-0 z-40 bg-navy-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-sm w-full bg-navy-900/90 border border-white/20 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div class="w-12 h-12 mx-auto rounded-full bg-brand-orange/20 border border-brand-orange flex items-center justify-center text-brand-orange">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                </svg>
+            </div>
+            <h3 class="text-lg font-black text-white">カメラ映像が一時中断されました</h3>
+            <p class="text-xs text-slate-300 leading-relaxed">画面のロックやアプリの切り替えによりカメラ接続が停止しました。下のボタンを押して撮影を再開してください。</p>
+            <button id="resumeCameraBtn" type="button" class="w-full py-3 px-4 rounded-xl bg-brand-orange hover:bg-brand-orangeHover text-white font-black text-sm shadow-lg active:scale-95 transition">
+                カメラを再開する
+            </button>
+        </div>
+    </div>
+
+    <!-- エラー・システム通知オーバーレイ -->
+    <div id="messageBox" class="hidden fixed inset-4 z-50 rounded-2xl p-5 bg-red-950/95 backdrop-blur-md border-2 border-red-500 text-white shadow-2xl flex items-center justify-center">
+        <div class="flex items-start gap-3 max-w-md">
+            <svg class="w-7 h-7 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            <div class="flex-1">
+                <h3 id="messageTitle" class="font-bold text-base sm:text-lg text-red-200">カメラを起動できません</h3>
+                <p id="messageBody" class="text-xs sm:text-sm text-red-100 mt-1.5 leading-relaxed"></p>
+                <button id="retryCameraBtn" type="button" class="mt-4 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm">
+                    カメラを再試行する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 上部フローティングHUD（半透明グラスピル） -->
+    <header class="hud-top safe-top fixed top-0 inset-x-0 z-30 pb-2 flex items-center justify-between gap-2 pointer-events-none">
+        <!-- 左側：ステータスバッジ群 -->
+        <div class="flex items-center gap-1.5 sm:gap-2 pointer-events-auto flex-wrap">
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-navy-950/75 backdrop-blur-md border border-white/15 shadow-lg">
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-brand-orange animate-pulse" id="recIndicator"></span>
+                <span id="statusBadge" class="font-black text-xs sm:text-sm text-white tracking-wide">
+                    遅延再生: 10秒遅れ
+                </span>
+            </div>
+            <span id="zoomBadge" class="hidden px-2.5 py-1.5 rounded-full font-black text-xs bg-sky-500 text-navy-950 shadow-lg">
+                1.0x
+            </span>
+        </div>
+
+        <!-- 右側：クイックユーティリティ（LIVE小窓切替 / カメラ切替 / 全画面API / 設定） -->
+        <div class="flex items-center gap-1.5 pointer-events-auto">
+            <!-- リアルタイム小窓(PiP)表示切替 -->
+            <button id="togglePipBtn" type="button" class="px-2.5 py-1.5 rounded-full bg-navy-950/75 backdrop-blur-md border border-brand-orange/80 text-white text-xs font-bold flex items-center gap-1 shadow-lg active:scale-95 transition" title="LIVE小窓の表示切替">
+                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                <span class="hidden sm:inline">LIVE小窓</span>
+            </button>
+
+            <!-- カメラ前後切替 -->
+            <button id="switchCamBtn" type="button" class="px-2.5 py-1.5 rounded-full bg-navy-950/75 backdrop-blur-md border border-white/15 text-white text-xs font-bold flex items-center gap-1 shadow-lg active:scale-95 transition" title="カメラ前後切替">
+                <svg class="w-4 h-4 text-brand-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <span id="camFacingText" class="hidden sm:inline">背面</span>
+            </button>
+
+            <!-- ブラウザ完全全画面切替 (Fullscreen API) -->
+            <button id="fullscreenBtn" type="button" class="p-2 rounded-full bg-navy-950/75 backdrop-blur-md border border-white/15 text-white shadow-lg active:scale-95 transition" aria-label="全画面表示切替" title="全画面表示">
+                <svg id="fsEnterIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                </svg>
+                <svg id="fsExitIcon" class="w-4 h-4 hidden text-brand-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4H4m0 0l5 5M15 9V4h5m0 0l-5 5M9 15v5H4m0 0l5-5m6 5v-5h5m0 0l-5 5"></path>
+                </svg>
+            </button>
+
+            <!-- 設定メニュー開閉 -->
+            <button id="settingsToggleBtn" type="button" class="p-2 rounded-full bg-navy-950/75 backdrop-blur-md border border-white/15 text-white shadow-lg active:scale-95 transition" aria-label="設定" title="設定">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- フローティング設定モーダルパネル -->
+    <div id="settingsPanel" class="hidden fixed top-14 right-3 left-3 sm:left-auto sm:w-96 bg-navy-950/90 backdrop-blur-xl border border-white/20 rounded-2xl p-4 space-y-3 text-sm z-40 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-white/10 pb-2">
+            <h2 class="font-black text-white">カメラ・表示設定</h2>
+            <button id="closeSettingsBtn" type="button" class="text-slate-400 hover:text-white p-1">✕</button>
+        </div>
+
+        <!-- ハードウェアカメラズーム（端末カメラ対応時のみ有効） -->
+        <div id="hwZoomSection" class="hidden space-y-1.5 bg-white/5 p-2.5 rounded-xl border border-white/10">
+            <div class="flex items-center justify-between">
+                <p class="font-bold text-xs text-slate-200">カメラ光学/デジタルズーム (撮影倍率)</p>
+                <span id="hwZoomValueText" class="text-xs font-black text-brand-orange tabular-nums">1.0x</span>
+            </div>
+            <input id="hwZoomSlider" type="range" min="1" max="4" step="0.1" value="1" aria-label="カメラ撮影倍率スライダー">
+            <p class="text-[11px] text-slate-400">※今後の録画フレーム自体の拡大倍率を変更します</p>
+        </div>
+
+        <!-- 画質設定 -->
+        <div class="space-y-1.5">
+            <p class="font-bold text-xs text-slate-300">録画解像度・最大遅延時間</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button type="button" data-quality="standard" class="quality-btn py-2 px-2 rounded-xl font-bold bg-brand-orange text-white text-xs">
+                    標準 (480p / 120秒)
+                </button>
+                <button type="button" data-quality="high" class="quality-btn py-2 px-2 rounded-xl font-bold bg-navy-800 text-slate-300 border border-navy-700 text-xs">
+                    高画質 (720p / 60秒)
+                </button>
+            </div>
+        </div>
+
+        <!-- 便利オプション群 -->
+        <div class="grid grid-cols-2 gap-2 pt-1">
+            <!-- 左右反転 -->
+            <button id="mirrorBtn" type="button" class="py-2 px-2.5 rounded-xl bg-navy-800 border border-navy-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition">
+                <span id="mirrorBtnText">左右反転: OFF</span>
+            </button>
+
+            <!-- 常時点灯 -->
+            <button id="wakeLockBtn" type="button" class="py-2 px-2.5 rounded-xl bg-navy-800 border border-navy-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition">
+                <span id="wakeLockIcon" class="w-2 h-2 rounded-full bg-slate-400"></span>
+                <span id="wakeLockText">常時点灯: OFF</span>
+            </button>
+
+            <!-- 自動UI非表示 (5秒後) -->
+            <button id="autoHideToggleBtn" type="button" class="py-2 px-2.5 rounded-xl bg-navy-800 border border-navy-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition">
+                <span id="autoHideText">自動UI非表示: OFF</span>
+            </button>
+
+            <!-- 履歴クリア -->
+            <button id="resetBufferBtn" type="button" class="py-2 px-2.5 rounded-xl bg-navy-800 border border-navy-700 text-red-300 hover:text-red-200 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition">
+                <span>履歴クリア</span>
+            </button>
+        </div>
+
+        <div class="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-white/10">
+            <span>バッファ: <strong id="bufferCountText" class="text-brand-orange">0</strong> フレーム</span>
+            <span>メモリ使用量: <strong id="memoryUsageText" class="text-white">0.0 MB</strong></span>
+        </div>
+    </div>
+
+    <!-- リアルタイム小窓プレビュー（右上フローティングPiP：画角確認用） -->
+    <div id="livePipContainer" style="top: calc(3.5rem + env(safe-area-inset-top)); right: max(0.75rem, env(safe-area-inset-right));" class="hud-pip fixed w-24 sm:w-36 aspect-[4/3] bg-navy-950 rounded-xl overflow-hidden border-2 border-white/80 shadow-2xl z-20 cursor-pointer transition-all duration-200" title="タップで小窓サイズ切替">
+        <canvas id="livePipCanvas" class="w-full h-full object-cover"></canvas>
+        <div class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-red-600/90 text-[9px] font-black text-white flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span> LIVE
+        </div>
+    </div>
+
+    <!-- 左側フローティングズームバー（表示拡大・パン操作用） -->
+    <div id="zoomHudBar" class="hud-zoom safe-left fixed top-1/2 -translate-y-1/2 z-25 flex flex-col items-center gap-1.5 bg-navy-950/75 backdrop-blur-xl border border-white/15 rounded-2xl p-1.5 shadow-2xl transition-opacity duration-200">
+        <button type="button" id="zoomInBtn" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-base flex items-center justify-center active:scale-95 transition" title="拡大 (+0.25x)">
+            +
+        </button>
+
+        <!-- 倍率プリセットボタン -->
+        <div class="flex flex-col gap-1 my-0.5">
+            <button type="button" data-zoom="3.0" class="zoom-preset-btn w-9 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-black text-slate-200 transition">3.0x</button>
+            <button type="button" data-zoom="2.0" class="zoom-preset-btn w-9 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-black text-slate-200 transition">2.0x</button>
+            <button type="button" data-zoom="1.5" class="zoom-preset-btn w-9 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-black text-slate-200 transition">1.5x</button>
+            <button type="button" data-zoom="1.0" class="zoom-preset-btn w-9 py-1 rounded-lg bg-brand-orange text-[10px] font-black text-white transition">1.0x</button>
+        </div>
+
+        <button type="button" id="zoomOutBtn" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-base flex items-center justify-center active:scale-95 transition" title="縮小 (-0.25x)">
+            −
+        </button>
+    </div>
+
+    <!-- 下部フローティングコントロールバー（半透明ダークガラス） -->
+    <footer class="hud-bottom safe-bottom fixed bottom-0 inset-x-0 z-30 pt-2 flex justify-center pointer-events-none">
+        <div class="hud-bottom-inner w-full max-w-2xl bg-navy-950/75 backdrop-blur-xl border border-white/15 rounded-2xl p-2.5 sm:p-3 shadow-2xl pointer-events-auto flex flex-col gap-2">
+
+            <!-- 上段：1秒単位の細かな遅延秒数調整（-5s / -1s / 直接入力 / +1s / +5s）＋ プリセット -->
+            <div class="landscape-row flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-1 flex-1">
+                    <button type="button" data-step="-5" class="step-btn py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 font-black text-xs text-slate-200 active:scale-95 transition">
+                        -5秒
+                    </button>
+                    <button type="button" data-step="-1" class="step-btn py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 font-black text-xs text-white active:scale-95 transition">
+                        -1秒
+                    </button>
+
+                    <!-- 直接数値入力ボックス -->
+                    <div class="flex items-baseline justify-center bg-black/60 border-2 border-brand-orange rounded-xl px-2 py-0.5 min-w-[82px]">
+                        <input id="delayNumberInput" type="number" min="1" max="120" value="10" inputmode="numeric" aria-label="遅延秒数を直接入力"
+                            class="w-11 bg-transparent text-center text-lg sm:text-xl font-black text-brand-orange tabular-nums focus:outline-none">
+                        <span class="text-xs font-bold text-white ml-0.5">秒</span>
+                    </div>
+
+                    <button type="button" data-step="1" class="step-btn py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 font-black text-xs text-white active:scale-95 transition">
+                        +1秒
+                    </button>
+                    <button type="button" data-step="5" class="step-btn py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 font-black text-xs text-slate-200 active:scale-95 transition">
+                        +5秒
+                    </button>
+                </div>
+
+                <!-- クイックプリセットボタン -->
+                <div class="grid grid-cols-5 gap-1 sm:w-64 shrink-0">
+                    <button type="button" data-delay="5" class="preset-btn py-1.5 rounded-lg font-black text-xs bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95 transition">
+                        5s
+                    </button>
+                    <button type="button" data-delay="10" class="preset-btn py-1.5 rounded-lg font-black text-xs bg-brand-orange text-white border border-brand-orange active:scale-95 transition">
+                        10s
+                    </button>
+                    <button type="button" data-delay="20" class="preset-btn py-1.5 rounded-lg font-black text-xs bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95 transition">
+                        20s
+                    </button>
+                    <button type="button" data-delay="40" class="preset-btn py-1.5 rounded-lg font-black text-xs bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95 transition">
+                        40s
+                    </button>
+                    <button type="button" data-delay="60" class="preset-btn py-1.5 rounded-lg font-black text-xs bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95 transition">
+                        60s
+                    </button>
+                </div>
+            </div>
+
+            <!-- 中段：1秒刻みスライダー -->
+            <div class="px-1">
+                <input id="delaySlider" type="range" min="1" max="120" value="10" step="1" aria-label="遅延時間スライダー">
+            </div>
+
+            <!-- 作成者クレジット -->
+            <p class="text-right text-[9px] leading-none text-white/40 tracking-wide -mt-0.5">鯖江高校体操部作成</p>
+        </div>
+    </footer>
+
+    <script>
+        /**
+         * 体操競技用 全画面遅延再生（タイムシフト）アプリケーション
+         * - 100vw x 100dvh フルスクリーン映像表示 + 半透明フローティングHUD
+         * - 画面タップによるクリーン全画面表示切替 & ブラウザFullscreen API対応
+         * - 縦横回転（ポートレート・ランドスケープ）自動適応 & 1秒単位の細かな遅延時間指定
+         */
+        (() => {
+            // --- DOM要素の取得 ---
+            const appRoot = document.getElementById('appRoot');
+            const videoStage = document.getElementById('videoStage');
+            const zoomTransformLayer = document.getElementById('zoomTransformLayer');
+            const cleanModePill = document.getElementById('cleanModePill');
+            const cleanModeText = document.getElementById('cleanModeText');
+            const zoomBadge = document.getElementById('zoomBadge');
+            const zoomHudBar = document.getElementById('zoomHudBar');
+            const zoomInBtn = document.getElementById('zoomInBtn');
+            const zoomOutBtn = document.getElementById('zoomOutBtn');
+            const zoomPresetBtns = document.querySelectorAll('.zoom-preset-btn');
+            const hwZoomSection = document.getElementById('hwZoomSection');
+            const hwZoomSlider = document.getElementById('hwZoomSlider');
+            const hwZoomValueText = document.getElementById('hwZoomValueText');
+
+            const video = document.getElementById('cameraVideo');
+            const captureCanvas = document.getElementById('captureCanvas');
+            const captureCtx = captureCanvas.getContext('2d', { alpha: false });
+            const playbackCanvas = document.getElementById('playbackCanvas');
+            const playbackCtx = playbackCanvas.getContext('2d', { alpha: false });
+            const livePipCanvas = document.getElementById('livePipCanvas');
+            const livePipCtx = livePipCanvas.getContext('2d', { alpha: false });
+
+            const delaySlider = document.getElementById('delaySlider');
+            const delayNumberInput = document.getElementById('delayNumberInput');
+            const stepBtns = document.querySelectorAll('.step-btn');
+            const presetBtns = document.querySelectorAll('.preset-btn');
+
+            const switchCamBtn = document.getElementById('switchCamBtn');
+            const camFacingText = document.getElementById('camFacingText');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            const fsEnterIcon = document.getElementById('fsEnterIcon');
+            const fsExitIcon = document.getElementById('fsExitIcon');
+            const togglePipBtn = document.getElementById('togglePipBtn');
+
+            const mirrorBtn = document.getElementById('mirrorBtn');
+            const mirrorBtnText = document.getElementById('mirrorBtnText');
+            const resetBufferBtn = document.getElementById('resetBufferBtn');
+            const autoHideToggleBtn = document.getElementById('autoHideToggleBtn');
+            const autoHideText = document.getElementById('autoHideText');
+
+            const bufferingOverlay = document.getElementById('bufferingOverlay');
+            const countdownSec = document.getElementById('countdownSec');
+            const bufferProgressBar = document.getElementById('bufferProgressBar');
+            const statusBadge = document.getElementById('statusBadge');
+            const livePipContainer = document.getElementById('livePipContainer');
+
+            const wakeLockBtn = document.getElementById('wakeLockBtn');
+            const wakeLockIcon = document.getElementById('wakeLockIcon');
+            const wakeLockText = document.getElementById('wakeLockText');
+            const settingsToggleBtn = document.getElementById('settingsToggleBtn');
+            const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+            const settingsPanel = document.getElementById('settingsPanel');
+            const qualityBtns = document.querySelectorAll('.quality-btn');
+            const bufferCountText = document.getElementById('bufferCountText');
+            const memoryUsageText = document.getElementById('memoryUsageText');
+
+            const messageBox = document.getElementById('messageBox');
+            const messageTitle = document.getElementById('messageTitle');
+            const messageBody = document.getElementById('messageBody');
+            const retryCameraBtn = document.getElementById('retryCameraBtn');
+            const streamInterruptedOverlay = document.getElementById('streamInterruptedOverlay');
+            const resumeCameraBtn = document.getElementById('resumeCameraBtn');
+
+            // --- アプリケーション状態管理 ---
+            const QUALITY_PRESETS = {
+                standard: { width: 640, height: 480, fps: 15, jpegQuality: 0.72, maxDelay: 120 },
+                high: { width: 960, height: 540, fps: 24, jpegQuality: 0.78, maxDelay: 60 }
+            };
+
+            let currentQuality = 'standard';
+            let targetDelaySec = 10;
+            let facingMode = 'environment';
+            let isMirrored = false;
+            let stream = null;
+            let cameraSessionId = 0; // カメラ切替・リセット時の非同期レースコンディション防止用世代ID
+
+            // HUD表示状態・自動非表示設定
+            let isHudHidden = false;
+            let autoHideEnabled = false;
+            let autoHideTimer = null;
+            let isPipVisible = true;
+
+            // フレームバッファ: { timestamp: number, blob: Blob, size: number }
+            let frameBuffer = [];
+            let totalBufferBytes = 0;
+            let bufferGeneration = 0; // バッファクリア時の非同期描画競合防止用世代カウンタ
+            let captureTimerId = null;
+            let renderAnimId = null;
+            let isCapturingBlob = false;
+            let isDrawingPlayback = false;
+            let pendingDrawFrame = null;
+
+            let lastDrawnFrameTimestamp = 0;
+
+            // Wake Lock (画面スリープ防止)
+            let wakeLockSentinel = null;
+
+            // ビューポート手動ズーム・パン状態
+            const MIN_ZOOM = 1.0;
+            const MAX_ZOOM = 5.0;
+            let viewZoom = 1.0;
+            let panX = 0;
+            let panY = 0;
+
+            // --- 実際の映像描画領域（object-contain準拠）に基づく厳密なパンクランプ ---
+            function getRenderedVideoBounds() {
+                const stageRect = videoStage.getBoundingClientRect();
+                const stageW = stageRect.width || window.innerWidth;
+                const stageH = stageRect.height || window.innerHeight;
+                const vidW = playbackCanvas.width || 640;
+                const vidH = playbackCanvas.height || 480;
+
+                const stageAspect = stageW / stageH;
+                const vidAspect = vidW / vidH;
+
+                let drawnW = stageW;
+                let drawnH = stageH;
+                if (vidAspect > stageAspect) {
+                    drawnH = stageW / vidAspect;
+                } else {
+                    drawnW = stageH * vidAspect;
+                }
+                return { stageW, stageH, drawnW, drawnH };
+            }
+
+            function clampPan(x, y, scale) {
+                if (scale <= 1.0) return { x: 0, y: 0 };
+                const { stageW, stageH, drawnW, drawnH } = getRenderedVideoBounds();
+                // 拡大後の映像領域が画面領域を超える分だけを最大移動量とする（黒余白への過剰移動を防止）
+                const maxOffsetX = Math.max(0, (drawnW * scale - stageW) / 2);
+                const maxOffsetY = Math.max(0, (drawnH * scale - stageH) / 2);
+                return {
+                    x: Math.max(-maxOffsetX, Math.min(maxOffsetX, x)),
+                    y: Math.max(-maxOffsetY, Math.min(maxOffsetY, y))
+                };
+            }
+
+            function applyViewTransform() {
+                const clamped = clampPan(panX, panY, viewZoom);
+                panX = clamped.x;
+                panY = clamped.y;
+
+                zoomTransformLayer.style.transform = `translate3d(${panX.toFixed(1)}px, ${panY.toFixed(1)}px, 0) scale(${viewZoom.toFixed(3)})`;
+
+                // ズーム倍率バッジ & プリセットボタンの更新
+                if (viewZoom > 1.01) {
+                    zoomBadge.textContent = `${viewZoom.toFixed(1)}x 拡大`;
+                    zoomBadge.classList.remove('hidden');
+                    videoStage.classList.remove('cursor-pointer');
+                    videoStage.classList.add('cursor-grab');
+                } else {
+                    zoomBadge.classList.add('hidden');
+                    videoStage.classList.add('cursor-pointer');
+                    videoStage.classList.remove('cursor-grab');
+                }
+
+                zoomPresetBtns.forEach(btn => {
+                    const target = parseFloat(btn.dataset.zoom);
+                    if (Math.abs(viewZoom - target) < 0.08) {
+                        btn.classList.remove('bg-white/10', 'text-slate-200');
+                        btn.classList.add('bg-brand-orange', 'text-white');
+                    } else {
+                        btn.classList.add('bg-white/10', 'text-slate-200');
+                        btn.classList.remove('bg-brand-orange', 'text-white');
+                    }
+                });
+            }
+
+            function setViewZoom(newScale, focalClientX = null, focalClientY = null) {
+                const clampedScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale));
+                if (clampedScale <= 1.0) {
+                    viewZoom = 1.0;
+                    panX = 0;
+                    panY = 0;
+                    applyViewTransform();
+                    return;
+                }
+
+                if (focalClientX !== null && focalClientY !== null) {
+                    const rect = videoStage.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    const offsetX = focalClientX - centerX;
+                    const offsetY = focalClientY - centerY;
+                    const ratio = clampedScale / viewZoom;
+                    panX = offsetX - (offsetX - panX) * ratio;
+                    panY = offsetY - (offsetY - panY) * ratio;
+                }
+
+                viewZoom = clampedScale;
+                applyViewTransform();
+            }
+
+            // ズームバーのボタン操作
+            zoomInBtn.addEventListener('click', () => {
+                setViewZoom(viewZoom + 0.25);
+                resetAutoHideTimer();
+            });
+
+            zoomOutBtn.addEventListener('click', () => {
+                setViewZoom(viewZoom - 0.25);
+                resetAutoHideTimer();
+            });
+
+            zoomPresetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const z = parseFloat(btn.dataset.zoom);
+                    setViewZoom(z);
+                    resetAutoHideTimer();
+                });
+            });
+
+            // マウスホイールでのズーム操作
+            videoStage.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY < 0 ? 0.2 : -0.2;
+                setViewZoom(viewZoom + delta, e.clientX, e.clientY);
+                resetAutoHideTimer();
+            }, { passive: false });
+
+            // マルチタッチ（ピンチズーム・1本指パン・シングルタップHUD切替・ダブルタップ2.0x切替）
+            // ジェスチャー状態マシンにより、ピンチ解除直後の誤タップやダブルタップ時のHUDちらつきを完全に防止
+            const activePointers = new Map();
+            let initialPinchDistance = 0;
+            let initialPinchZoom = 1.0;
+            let lastPanPoint = null;
+            let pointerDownStart = null;
+            let isPinching = false;
+            let pinchCooldownUntil = 0;
+            let hasDraggedOrPinched = false;
+            let singleTapTimer = null;
+            let lastTapTimestamp = 0;
+            let lastTapPos = { x: 0, y: 0 };
+
+            function getPinchDistance() {
+                const pts = Array.from(activePointers.values());
+                if (pts.length < 2) return 0;
+                return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            }
+
+            function getPinchMidpoint() {
+                const pts = Array.from(activePointers.values());
+                if (pts.length < 2) return { x: 0, y: 0 };
+                return {
+                    x: (pts[0].x + pts[1].x) / 2,
+                    y: (pts[0].y + pts[1].y) / 2
+                };
+            }
+
+            videoStage.addEventListener('pointerdown', (e) => {
+                if (e.button !== undefined && e.button !== 0 && e.pointerType === 'mouse') return;
+                try {
+                    videoStage.setPointerCapture(e.pointerId);
+                } catch (_) {}
+                activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+                if (activePointers.size === 1) {
+                    pointerDownStart = { x: e.clientX, y: e.clientY, time: performance.now() };
+                    lastPanPoint = { x: e.clientX, y: e.clientY };
+                    hasDraggedOrPinched = false;
+                } else if (activePointers.size >= 2) {
+                    // 2本目の指が触れた瞬間にシングルタップ予約を即キャンセル
+                    if (singleTapTimer) {
+                        clearTimeout(singleTapTimer);
+                        singleTapTimer = null;
+                    }
+                    lastTapTimestamp = 0;
+                    isPinching = true;
+                    hasDraggedOrPinched = true;
+                    initialPinchDistance = getPinchDistance();
+                    initialPinchZoom = viewZoom;
+                }
+            });
+
+            videoStage.addEventListener('pointermove', (e) => {
+                if (!activePointers.has(e.pointerId)) return;
+                activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+                if (activePointers.size >= 2 && initialPinchDistance > 0) {
+                    isPinching = true;
+                    hasDraggedOrPinched = true;
+                    const currentDist = getPinchDistance();
+                    const mid = getPinchMidpoint();
+                    const nextScale = initialPinchZoom * (currentDist / initialPinchDistance);
+                    setViewZoom(nextScale, mid.x, mid.y);
+                } else if (activePointers.size === 1 && !isPinching && lastPanPoint) {
+                    const dx = e.clientX - lastPanPoint.x;
+                    const dy = e.clientY - lastPanPoint.y;
+
+                    if (pointerDownStart && Math.hypot(e.clientX - pointerDownStart.x, e.clientY - pointerDownStart.y) > 8) {
+                        hasDraggedOrPinched = true;
+                    }
+
+                    if (viewZoom > 1.0) {
+                        panX += dx;
+                        panY += dy;
+                        applyViewTransform();
+                    }
+                    lastPanPoint = { x: e.clientX, y: e.clientY };
+                }
+            });
+
+            function handlePointerEnd(e) {
+                activePointers.delete(e.pointerId);
+
+                if (activePointers.size === 1) {
+                    // ピンチ操作中に片方の指が先に離れた場合：残りの指で急激なジャンプや誤タップが起きないよう保護
+                    const remaining = Array.from(activePointers.values())[0];
+                    lastPanPoint = { x: remaining.x, y: remaining.y };
+                    initialPinchDistance = 0;
+                    hasDraggedOrPinched = true;
+                    pinchCooldownUntil = performance.now() + 300;
+                    return;
+                }
+
+                if (activePointers.size === 0) {
+                    const wasPinching = isPinching;
+                    isPinching = false;
+                    initialPinchDistance = 0;
+                    lastPanPoint = null;
+
+                    if (wasPinching) {
+                        pinchCooldownUntil = performance.now() + 300;
+                        pointerDownStart = null;
+                        return;
+                    }
+
+                    const now = performance.now();
+                    // ドラッグ・ピンチ直後のクールダウン期間中はタップイベントを無視
+                    if (!hasDraggedOrPinched && pointerDownStart && now >= pinchCooldownUntil) {
+                        const tapX = e.clientX;
+                        const tapY = e.clientY;
+
+                        if (!settingsPanel.classList.contains('hidden')) {
+                            settingsPanel.classList.add('hidden');
+                            resetAutoHideTimer();
+                            pointerDownStart = null;
+                            return;
+                        }
+
+                        // ダブルタップ判定（280ms以内 かつ 移動距離45px以内）で2.0xズーム切替
+                        const distFromLastTap = Math.hypot(tapX - lastTapPos.x, tapY - lastTapPos.y);
+                        if (now - lastTapTimestamp < 280 && distFromLastTap < 45) {
+                            if (singleTapTimer) {
+                                clearTimeout(singleTapTimer);
+                                singleTapTimer = null;
+                            }
+                            lastTapTimestamp = 0;
+                            if (viewZoom > 1.05) {
+                                setViewZoom(1.0);
+                            } else {
+                                setViewZoom(2.0, tapX, tapY);
+                            }
+                            resetAutoHideTimer();
+                        } else {
+                            lastTapTimestamp = now;
+                            lastTapPos = { x: tapX, y: tapY };
+                            if (singleTapTimer) clearTimeout(singleTapTimer);
+                            singleTapTimer = setTimeout(() => {
+                                if (!isPinching && performance.now() >= pinchCooldownUntil) {
+                                    setHudHidden(!isHudHidden);
+                                }
+                                singleTapTimer = null;
+                            }, 285);
+                        }
+                    }
+                    pointerDownStart = null;
+                }
+            }
+
+            videoStage.addEventListener('pointerup', handlePointerEnd);
+            videoStage.addEventListener('pointercancel', handlePointerEnd);
+
+            // --- HUD表示・クリーン全画面モード制御 ---
+            function setHudHidden(hidden) {
+                isHudHidden = hidden;
+                if (isHudHidden) {
+                    appRoot.classList.add('hud-hidden');
+                    settingsPanel.classList.add('hidden');
+                    cleanModePill.classList.remove('hidden');
+                    cleanModeText.textContent = `${targetDelaySec}秒遅れ • 画面タップで操作表示`;
+                } else {
+                    appRoot.classList.remove('hud-hidden');
+                    cleanModePill.classList.add('hidden');
+                    resetAutoHideTimer();
+                }
+            }
+
+            function resetAutoHideTimer() {
+                if (autoHideTimer) {
+                    clearTimeout(autoHideTimer);
+                    autoHideTimer = null;
+                }
+                if (autoHideEnabled && !isHudHidden && settingsPanel.classList.contains('hidden')) {
+                    autoHideTimer = setTimeout(() => {
+                        if (document.activeElement !== delayNumberInput) {
+                            setHudHidden(true);
+                        }
+                    }, 5000);
+                }
+            }
+
+            // コントロール操作時は自動非表示タイマーを延長
+            ['pointerdown', 'input', 'change'].forEach(evt => {
+                document.querySelector('.hud-bottom').addEventListener(evt, resetAutoHideTimer, { passive: true });
+                document.querySelector('.hud-top').addEventListener(evt, resetAutoHideTimer, { passive: true });
+                zoomHudBar.addEventListener(evt, resetAutoHideTimer, { passive: true });
+            });
+
+            autoHideToggleBtn.addEventListener('click', () => {
+                autoHideEnabled = !autoHideEnabled;
+                if (autoHideEnabled) {
+                    autoHideText.textContent = '自動UI非表示: ON';
+                    autoHideToggleBtn.classList.add('border-brand-orange', 'text-white');
+                    resetAutoHideTimer();
+                } else {
+                    autoHideText.textContent = '自動UI非表示: OFF';
+                    autoHideToggleBtn.classList.remove('border-brand-orange', 'text-white');
+                    if (autoHideTimer) clearTimeout(autoHideTimer);
+                }
+            });
+
+            // --- ブラウザ Fullscreen API 切替（iOS Safari非対応時のフォールバック含む） ---
+            function isFullscreenSupported() {
+                return !!(
+                    document.fullscreenEnabled ||
+                    document.webkitFullscreenEnabled ||
+                    document.documentElement.requestFullscreen ||
+                    document.documentElement.webkitRequestFullscreen
+                );
+            }
+
+            function updateFullscreenIcon() {
+                const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+                if (isFs) {
+                    fsEnterIcon.classList.add('hidden');
+                    fsExitIcon.classList.remove('hidden');
+                } else {
+                    fsEnterIcon.classList.remove('hidden');
+                    fsExitIcon.classList.add('hidden');
+                }
+            }
+
+            fullscreenBtn.addEventListener('click', async () => {
+                const docEl = document.documentElement;
+                const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+                try {
+                    if (!isFs) {
+                        if (docEl.requestFullscreen) {
+                            await docEl.requestFullscreen();
+                        } else if (docEl.webkitRequestFullscreen) {
+                            await docEl.webkitRequestFullscreen();
+                        } else {
+                            setHudHidden(!isHudHidden);
+                        }
+                    } else {
+                        if (document.exitFullscreen) {
+                            await document.exitFullscreen();
+                        } else if (document.webkitExitFullscreen) {
+                            await document.webkitExitFullscreen();
+                        }
+                    }
+                } catch (e) {
+                    // iOS Safari等非対応・拒否環境ではクリーン全画面モードにフォールバック
+                    setHudHidden(!isHudHidden);
+                }
+            });
+
+            document.addEventListener('fullscreenchange', updateFullscreenIcon);
+            document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
+
+            // --- 画面回転・リサイズ時のアスペクト比同期 ---
+            function syncCanvasDimensions() {
+                if (!video || video.readyState < 1) return;
+                const preset = QUALITY_PRESETS[currentQuality];
+                const vw = video.videoWidth || preset.width;
+                const vh = video.videoHeight || preset.height;
+
+                if (captureCanvas.width !== vw || captureCanvas.height !== vh) {
+                    captureCanvas.width = vw;
+                    captureCanvas.height = vh;
+                    livePipCanvas.width = Math.max(160, Math.round(vw / 2));
+                    livePipCanvas.height = Math.max(120, Math.round(vh / 2));
+                    // 再生Canvasはバッファが空（起動直後）のときだけ初期サイズを合わせる。
+                    // 以降は描画フレームのサイズに追従（fitPlaybackCanvasTo）
+                    if (frameBuffer.length === 0) {
+                        playbackCanvas.width = vw;
+                        playbackCanvas.height = vh;
+                        lastDrawnFrameTimestamp = 0;
+                    }
+                }
+                applyViewTransform();
+            }
+
+            let resizeDebounceTimer = null;
+            function handleViewportResize() {
+                if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
+                resizeDebounceTimer = setTimeout(() => {
+                    syncCanvasDimensions();
+                    applyViewTransform();
+                }, 120);
+            }
+
+            window.addEventListener('resize', handleViewportResize);
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', handleViewportResize);
+            }
+            if (screen.orientation && screen.orientation.addEventListener) {
+                screen.orientation.addEventListener('change', handleViewportResize);
+            }
+
+            // --- エラー表示ユーティリティ ---
+            function showError(title, body) {
+                messageTitle.textContent = title;
+                messageBody.textContent = body;
+                messageBox.classList.remove('hidden');
+            }
+
+            function hideError() {
+                messageBox.classList.add('hidden');
+            }
+
+            // --- バッファの安全なクリア ---
+            function clearBuffer() {
+                bufferGeneration++;
+                frameBuffer = [];
+                totalBufferBytes = 0;
+                lastDrawnFrameTimestamp = 0;
+                pendingDrawFrame = null;
+                updateBufferStats();
+            }
+
+            function updateBufferStats() {
+                bufferCountText.textContent = frameBuffer.length;
+                const mb = (totalBufferBytes / (1024 * 1024)).toFixed(1);
+                memoryUsageText.textContent = `${mb} MB`;
+            }
+
+            // --- カメラ初期化・ストリーム取得 ---
+            async function initCamera() {
+                const currentSession = ++cameraSessionId;
+                hideError();
+                streamInterruptedOverlay.classList.add('hidden');
+                stopCaptureLoop();
+                clearBuffer();
+
+                if (stream) {
+                    stream.getTracks().forEach(track => {
+                        track.onended = null;
+                        track.stop();
+                    });
+                    stream = null;
+                }
+
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    showError(
+                        'カメラ機能を利用できません',
+                        'ブラウザのセキュリティ制限によりカメラにアクセスできません。HTTPS接続（https://）またはlocalhost環境で開いているか確認してください。'
+                    );
+                    return;
+                }
+
+                const preset = QUALITY_PRESETS[currentQuality];
+                const constraints = {
+                    audio: false,
+                    video: {
+                        facingMode: { ideal: facingMode },
+                        width: { ideal: preset.width },
+                        height: { ideal: preset.height },
+                        frameRate: { ideal: preset.fps }
+                    }
+                };
+
+                try {
+                    const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    // 初期化完了前に別カメラへ切り替えられた場合は即破棄
+                    if (currentSession !== cameraSessionId) {
+                        newStream.getTracks().forEach(t => t.stop());
+                        return;
+                    }
+
+                    stream = newStream;
+                    video.srcObject = stream;
+
+                    // トラック予期せぬ終了（ロック・他アプリ占有等）の監視
+                    const videoTrack = stream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        videoTrack.onended = () => {
+                            if (currentSession === cameraSessionId) {
+                                streamInterruptedOverlay.classList.remove('hidden');
+                            }
+                        };
+                    }
+
+                    await new Promise((resolve) => {
+                        if (video.readyState >= 1) {
+                            video.play().then(resolve).catch(resolve);
+                        } else {
+                            video.onloadedmetadata = () => {
+                                video.play().then(resolve).catch(resolve);
+                            };
+                        }
+                    });
+
+                    if (currentSession !== cameraSessionId) return;
+
+                    syncCanvasDimensions();
+                    setupHardwareZoom(stream);
+
+                    // 前面カメラ時は自動で左右反転をONにすると自然
+                    if (facingMode === 'user' && !isMirrored) {
+                        toggleMirror(true);
+                    } else if (facingMode === 'environment' && isMirrored) {
+                        toggleMirror(false);
+                    }
+
+                    startCaptureLoop();
+                    startRenderLoop();
+                    requestWakeLock();
+
+                } catch (err) {
+                    if (currentSession !== cameraSessionId) return;
+                    console.error('Camera Error:', err);
+                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                        showError(
+                            'カメラの使用が許可されていません',
+                            'iPad・スマートフォンの「設定」またはブラウザのアドレスバー付近のアイコンから、このサイトのカメラアクセスを「許可」に変更して再試行してください。'
+                        );
+                    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                        showError(
+                            'カメラが見つかりません',
+                            'デバイスに利用可能なカメラが接続されていないか、他のアプリがカメラを占有しています。'
+                        );
+                    } else {
+                        showError(
+                            'カメラの起動中にエラーが発生しました',
+                            `詳細: ${err.message || err.name}。ページを再読み込みするか、カメラを再試行してください。`
+                        );
+                    }
+                }
+            }
+
+            // --- カメラハードウェアズーム初期化（対応デバイス向け） ---
+            function setupHardwareZoom(mediaStream) {
+                try {
+                    const videoTrack = mediaStream.getVideoTracks()[0];
+                    if (!videoTrack || typeof videoTrack.getCapabilities !== 'function') {
+                        hwZoomSection.classList.add('hidden');
+                        return;
+                    }
+                    const capabilities = videoTrack.getCapabilities();
+                    if (capabilities && capabilities.zoom && typeof capabilities.zoom.min === 'number' && typeof capabilities.zoom.max === 'number' && capabilities.zoom.max > capabilities.zoom.min) {
+                        hwZoomSlider.min = capabilities.zoom.min;
+                        hwZoomSlider.max = capabilities.zoom.max;
+                        hwZoomSlider.step = capabilities.zoom.step || 0.1;
+                        const settings = typeof videoTrack.getSettings === 'function' ? videoTrack.getSettings() : {};
+                        const currentZoom = settings.zoom || capabilities.zoom.min || 1;
+                        hwZoomSlider.value = currentZoom;
+                        hwZoomValueText.textContent = `${Number(currentZoom).toFixed(1)}x`;
+                        hwZoomSection.classList.remove('hidden');
+                    } else {
+                        hwZoomSection.classList.add('hidden');
+                    }
+                } catch (_) {
+                    hwZoomSection.classList.add('hidden');
+                }
+            }
+
+            hwZoomSlider.addEventListener('input', async (e) => {
+                const val = parseFloat(e.target.value);
+                if (isNaN(val)) return;
+                hwZoomValueText.textContent = `${val.toFixed(1)}x`;
+                if (!stream) return;
+                const videoTrack = stream.getVideoTracks()[0];
+                if (videoTrack && typeof videoTrack.applyConstraints === 'function') {
+                    try {
+                        await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
+                    } catch (_) {
+                        // ハードウェアズーム適用不可時は無視
+                    }
+                }
+            });
+
+            // --- フレームキャプチャループ（リングバッファ蓄積・バックプレッシャー制御） ---
+            function startCaptureLoop() {
+                stopCaptureLoop();
+                const preset = QUALITY_PRESETS[currentQuality];
+                const intervalMs = Math.round(1000 / preset.fps);
+                const maxBufferSeconds = preset.maxDelay + 5;
+
+                captureTimerId = setInterval(() => {
+                    if (!stream || video.readyState < 2) return;
+
+                    const activeTrack = stream.getVideoTracks()[0];
+                    if (activeTrack && activeTrack.readyState === 'ended') {
+                        streamInterruptedOverlay.classList.remove('hidden');
+                        return;
+                    }
+
+                    if (video.videoWidth && (video.videoWidth !== captureCanvas.width || video.videoHeight !== captureCanvas.height)) {
+                        syncCanvasDimensions();
+                    }
+
+                    const now = performance.now();
+
+                    // リアルタイム小窓（PiP）の描画は表示中のみ更新
+                    if (isPipVisible) {
+                        livePipCtx.drawImage(video, 0, 0, livePipCanvas.width, livePipCanvas.height);
+                    }
+
+                    // エンコード中（isCapturingBlob）はスキップしてメモリ詰まり・コールバック滞留を防止
+                    if (isCapturingBlob) return;
+
+                    const genAtCapture = bufferGeneration;
+                    isCapturingBlob = true;
+                    captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+
+                    captureCanvas.toBlob((blob) => {
+                        isCapturingBlob = false;
+                        // バッファリセット後・無効Blobは即破棄
+                        if (!blob || genAtCapture !== bufferGeneration) return;
+
+                        frameBuffer.push({
+                            timestamp: now,
+                            blob: blob,
+                            size: blob.size
+                        });
+                        totalBufferBytes += blob.size;
+
+                        const cutoffTime = now - (maxBufferSeconds * 1000);
+                        while (frameBuffer.length > 0 && frameBuffer[0].timestamp < cutoffTime) {
+                            const removed = frameBuffer.shift();
+                            totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
+                        }
+
+                        const MAX_MEMORY_BYTES = 280 * 1024 * 1024;
+                        while (totalBufferBytes > MAX_MEMORY_BYTES && frameBuffer.length > 10) {
+                            const removed = frameBuffer.shift();
+                            totalBufferBytes = Math.max(0, totalBufferBytes - removed.size);
+                        }
+
+                        if (frameBuffer.length % 15 === 0) {
+                            updateBufferStats();
+                        }
+                    }, 'image/jpeg', preset.jpegQuality);
+
+                }, intervalMs);
+            }
+
+            function stopCaptureLoop() {
+                if (captureTimerId) {
+                    clearInterval(captureTimerId);
+                    captureTimerId = null;
+                }
+                isCapturingBlob = false;
+            }
+
+            // 画面回転などで録画解像度が変わった場合でも、過去フレームが引き伸ばされないよう
+            // 再生Canvasのサイズを描画するフレーム自身のサイズに合わせる
+            function fitPlaybackCanvasTo(w, h) {
+                if (!w || !h) return;
+                if (playbackCanvas.width !== w || playbackCanvas.height !== h) {
+                    playbackCanvas.width = w;
+                    playbackCanvas.height = h;
+                    applyViewTransform();
+                }
+            }
+
+            // --- 遅延フレーム描画ヘルパー（非同期デコード競合・URLリーク完全防止） ---
+            async function drawFrameToPlayback(frameObj) {
+                if (!frameObj || frameObj.timestamp === lastDrawnFrameTimestamp) return;
+
+                // すでに別フレームをデコード中の場合は最新フレームを予約してスキップ
+                if (isDrawingPlayback) {
+                    pendingDrawFrame = frameObj;
+                    return;
+                }
+
+                isDrawingPlayback = true;
+                lastDrawnFrameTimestamp = frameObj.timestamp;
+                const genAtDraw = bufferGeneration;
+
+                try {
+                    if ('createImageBitmap' in window) {
+                        const bitmap = await createImageBitmap(frameObj.blob);
+                        if (genAtDraw === bufferGeneration) {
+                            fitPlaybackCanvasTo(bitmap.width, bitmap.height);
+                            playbackCtx.drawImage(bitmap, 0, 0, playbackCanvas.width, playbackCanvas.height);
+                        }
+                        bitmap.close();
+                    } else {
+                        await new Promise((resolve) => {
+                            const url = URL.createObjectURL(frameObj.blob);
+                            const img = new Image();
+                            img.onload = () => {
+                                if (genAtDraw === bufferGeneration) {
+                                    fitPlaybackCanvasTo(img.naturalWidth, img.naturalHeight);
+                                    playbackCtx.drawImage(img, 0, 0, playbackCanvas.width, playbackCanvas.height);
+                                }
+                                URL.revokeObjectURL(url);
+                                img.onload = null;
+                                img.onerror = null;
+                                resolve();
+                            };
+                            img.onerror = () => {
+                                URL.revokeObjectURL(url);
+                                img.onload = null;
+                                img.onerror = null;
+                                resolve();
+                            };
+                            img.src = url;
+                        });
+                    }
+                } catch (_) {
+                    // デコード失敗時はスキップ
+                } finally {
+                    isDrawingPlayback = false;
+                    if (pendingDrawFrame && genAtDraw === bufferGeneration) {
+                        const nextFrame = pendingDrawFrame;
+                        pendingDrawFrame = null;
+                        if (nextFrame.timestamp !== lastDrawnFrameTimestamp) {
+                            drawFrameToPlayback(nextFrame);
+                        }
+                    } else {
+                        pendingDrawFrame = null;
+                    }
+                }
+            }
+
+            // --- 再生レンダリングループ ---
+            function startRenderLoop() {
+                if (renderAnimId) cancelAnimationFrame(renderAnimId);
+
+                function render(now) {
+                    renderAnimId = requestAnimationFrame(render);
+
+
+                    if (frameBuffer.length === 0) {
+                        bufferingOverlay.classList.remove('hidden');
+                        countdownSec.textContent = targetDelaySec.toFixed(1);
+                        bufferProgressBar.style.width = '0%';
+                        return;
+                    }
+
+                    const oldestTime = frameBuffer[0].timestamp;
+                    const newestTime = frameBuffer[frameBuffer.length - 1].timestamp;
+                    const bufferedDurationSec = Math.max(0, (newestTime - oldestTime) / 1000);
+
+                    if (bufferedDurationSec < targetDelaySec) {
+                        bufferingOverlay.classList.remove('hidden');
+                        const remaining = Math.max(0, targetDelaySec - bufferedDurationSec);
+                        countdownSec.textContent = remaining.toFixed(1);
+                        const progressPct = Math.min(100, (bufferedDurationSec / targetDelaySec) * 100);
+                        bufferProgressBar.style.width = `${progressPct}%`;
+                        return;
+                    }
+
+                    bufferingOverlay.classList.add('hidden');
+
+                    const virtualPlayheadTime = newestTime - (targetDelaySec * 1000);
+
+                    let low = 0;
+                    let high = frameBuffer.length - 1;
+                    let bestIdx = 0;
+
+                    while (low <= high) {
+                        const mid = (low + high) >> 1;
+                        if (frameBuffer[mid].timestamp <= virtualPlayheadTime) {
+                            bestIdx = mid;
+                            low = mid + 1;
+                        } else {
+                            high = mid - 1;
+                        }
+                    }
+
+                    drawFrameToPlayback(frameBuffer[bestIdx]);
+                }
+
+                renderAnimId = requestAnimationFrame(render);
+            }
+
+            // --- UIイベントハンドラ ---
+
+            // 遅延秒数の変更（1秒単位）
+            function setDelaySeconds(sec) {
+                const maxAllowed = QUALITY_PRESETS[currentQuality].maxDelay;
+                const parsed = parseInt(sec, 10);
+                if (isNaN(parsed)) {
+                    delayNumberInput.value = targetDelaySec;
+                    return;
+                }
+
+                targetDelaySec = Math.max(1, Math.min(maxAllowed, parsed));
+                delaySlider.max = maxAllowed;
+                delaySlider.value = targetDelaySec;
+                delayNumberInput.max = maxAllowed;
+                delayNumberInput.value = targetDelaySec;
+                updateStatusBadge();
+
+                presetBtns.forEach(btn => {
+                    const btnSec = parseInt(btn.dataset.delay, 10);
+                    if (btnSec === targetDelaySec) {
+                        btn.classList.remove('bg-white/10', 'border-white/10');
+                        btn.classList.add('bg-brand-orange', 'border-brand-orange');
+                    } else {
+                        btn.classList.add('bg-white/10', 'border-white/10');
+                        btn.classList.remove('bg-brand-orange', 'border-brand-orange');
+                    }
+                });
+            }
+
+            function updateStatusBadge() {
+                    statusBadge.textContent = `遅延再生: ${targetDelaySec}秒遅れ`;
+                    cleanModeText.textContent = `${targetDelaySec}秒遅れ • 画面タップで操作表示`;
+            }
+
+            delaySlider.addEventListener('input', (e) => {
+                setDelaySeconds(e.target.value);
+            });
+
+            delayNumberInput.addEventListener('change', (e) => {
+                setDelaySeconds(e.target.value);
+            });
+
+            delayNumberInput.addEventListener('blur', (e) => {
+                setDelaySeconds(e.target.value);
+            });
+
+            delayNumberInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.target.blur();
+                    setDelaySeconds(e.target.value);
+                }
+            });
+
+            stepBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const delta = parseInt(btn.dataset.step, 10);
+                    setDelaySeconds(targetDelaySec + delta);
+                });
+            });
+
+            presetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setDelaySeconds(btn.dataset.delay);
+                });
+            });
+
+            // カメラ前後切替
+            switchCamBtn.addEventListener('click', () => {
+                facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+                camFacingText.textContent = (facingMode === 'environment') ? '背面' : '前面';
+                initCamera();
+            });
+
+            // 左右反転（鏡像）切替
+            function toggleMirror(forceState) {
+                isMirrored = (typeof forceState === 'boolean') ? forceState : !isMirrored;
+                if (isMirrored) {
+                    playbackCanvas.classList.add('mirror-x');
+                    livePipCanvas.classList.add('mirror-x');
+                    mirrorBtnText.textContent = '左右反転: ON';
+                    mirrorBtn.classList.add('border-brand-orange', 'text-white');
+                } else {
+                    playbackCanvas.classList.remove('mirror-x');
+                    livePipCanvas.classList.remove('mirror-x');
+                    mirrorBtnText.textContent = '左右反転: OFF';
+                    mirrorBtn.classList.remove('border-brand-orange', 'text-white');
+                }
+            }
+
+            mirrorBtn.addEventListener('click', () => toggleMirror());
+
+            // バッファリセット
+            resetBufferBtn.addEventListener('click', () => {
+                clearBuffer();
+            });
+
+            // LIVE小窓の表示/非表示切替 & サイズ切替
+            togglePipBtn.addEventListener('click', () => {
+                isPipVisible = !isPipVisible;
+                if (isPipVisible) {
+                    livePipContainer.classList.remove('hidden');
+                    togglePipBtn.classList.add('border-brand-orange/80');
+                    togglePipBtn.classList.remove('border-white/15', 'opacity-60');
+                } else {
+                    livePipContainer.classList.add('hidden');
+                    togglePipBtn.classList.remove('border-brand-orange/80');
+                    togglePipBtn.classList.add('border-white/15', 'opacity-60');
+                }
+            });
+
+            let pipExpanded = false;
+            livePipContainer.addEventListener('click', () => {
+                pipExpanded = !pipExpanded;
+                if (pipExpanded) {
+                    livePipContainer.classList.remove('w-24', 'sm:w-36');
+                    livePipContainer.classList.add('w-44', 'sm:w-60');
+                } else {
+                    livePipContainer.classList.add('w-24', 'sm:w-36');
+                    livePipContainer.classList.remove('w-44', 'sm:w-60');
+                }
+            });
+
+            // 設定ドロワー開閉
+            // （設定パネル表示中は自動非表示タイマーを止め、閉じたら再開する）
+            settingsToggleBtn.addEventListener('click', () => {
+                settingsPanel.classList.toggle('hidden');
+                resetAutoHideTimer();
+            });
+
+            closeSettingsBtn.addEventListener('click', () => {
+                settingsPanel.classList.add('hidden');
+                resetAutoHideTimer();
+            });
+
+            // 画質切替ボタン
+            qualityBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const selected = btn.dataset.quality;
+                    if (selected === currentQuality) return;
+                    currentQuality = selected;
+
+                    qualityBtns.forEach(b => {
+                        if (b.dataset.quality === currentQuality) {
+                            b.classList.remove('bg-navy-800', 'text-slate-300', 'border', 'border-navy-700');
+                            b.classList.add('bg-brand-orange', 'text-white');
+                        } else {
+                            b.classList.add('bg-navy-800', 'text-slate-300', 'border', 'border-navy-700');
+                            b.classList.remove('bg-brand-orange', 'text-white');
+                        }
+                    });
+
+                    setDelaySeconds(targetDelaySec);
+                    initCamera();
+                });
+            });
+
+            // --- Screen Wake Lock API (画面スリープ防止) ---
+            async function requestWakeLock() {
+                if (!('wakeLock' in navigator)) {
+                    wakeLockText.textContent = '常時点灯: 非対応';
+                    return;
+                }
+                try {
+                    wakeLockSentinel = await navigator.wakeLock.request('screen');
+                    wakeLockText.textContent = '常時点灯: ON';
+                    wakeLockIcon.classList.remove('bg-slate-400');
+                    wakeLockIcon.classList.add('bg-brand-orange');
+                    wakeLockBtn.classList.add('border-brand-orange', 'text-white');
+
+                    wakeLockSentinel.addEventListener('release', () => {
+                        wakeLockSentinel = null;
+                        wakeLockText.textContent = '常時点灯: OFF';
+                        wakeLockIcon.classList.add('bg-slate-400');
+                        wakeLockIcon.classList.remove('bg-brand-orange');
+                        wakeLockBtn.classList.remove('border-brand-orange', 'text-white');
+                    });
+                } catch (_) {
+                    wakeLockText.textContent = '常時点灯: OFF';
+                }
+            }
+
+            let wakeLockUserDisabled = false;
+            wakeLockBtn.addEventListener('click', () => {
+                if (wakeLockSentinel) {
+                    wakeLockUserDisabled = true;
+                    wakeLockSentinel.release();
+                    wakeLockSentinel = null;
+                } else {
+                    wakeLockUserDisabled = false;
+                    requestWakeLock();
+                }
+            });
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    // 利用者が手動でOFFにした場合は、復帰時に勝手にONへ戻さない
+                    if (!wakeLockSentinel && !wakeLockUserDisabled) {
+                        requestWakeLock();
+                    }
+                    // バックグラウンド復帰時にカメラトラックが停止していた場合は復帰オーバーレイを表示
+                    if (stream) {
+                        const track = stream.getVideoTracks()[0];
+                        if (!track || track.readyState === 'ended') {
+                            streamInterruptedOverlay.classList.remove('hidden');
+                        } else if (video.paused) {
+                            video.play().catch(() => {});
+                        }
+                    }
+                }
+            });
+
+            retryCameraBtn.addEventListener('click', initCamera);
+            resumeCameraBtn.addEventListener('click', initCamera);
+
+            // アプリ起動時にカメラ初期化
+            function boot() {
+                setDelaySeconds(10);
+                initCamera();
+            }
+            if (document.readyState === 'loading') {
+                window.addEventListener('DOMContentLoaded', boot);
+            } else {
+                boot();
+            }
+        })();
+    </script>
+</body>
+</html>
