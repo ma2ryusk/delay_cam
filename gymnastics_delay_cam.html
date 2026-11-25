@@ -80,6 +80,27 @@
             }
         }
 
+        /* 設定パネル：画面の高さに収め、入りきらない分はパネル内でスクロール */
+        .settings-panel {
+            top: calc(3.5rem + env(safe-area-inset-top));
+            max-height: calc(100vh - 3.5rem - env(safe-area-inset-top) - 0.75rem - env(safe-area-inset-bottom));
+            max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top) - 0.75rem - env(safe-area-inset-bottom));
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+        }
+        /* 横向きなど高さが低い画面では余白を詰める */
+        @media (max-height: 600px) {
+            .settings-panel {
+                top: calc(3rem + env(safe-area-inset-top));
+                max-height: calc(100vh - 3rem - env(safe-area-inset-top) - 0.5rem - env(safe-area-inset-bottom));
+                max-height: calc(100dvh - 3rem - env(safe-area-inset-top) - 0.5rem - env(safe-area-inset-bottom));
+                padding: 0.75rem;
+            }
+            .settings-panel > * + * { margin-top: 0.5rem !important; }
+        }
+
         /* 左右反転（鏡像） */
         .mirror-x {
             transform: scaleX(-1);
@@ -270,7 +291,7 @@
     </header>
 
     <!-- フローティング設定モーダルパネル -->
-    <div id="settingsPanel" class="hidden fixed top-14 right-3 left-3 sm:left-auto sm:w-96 bg-navy-950/90 backdrop-blur-xl border border-white/20 rounded-2xl p-4 space-y-3 text-sm z-40 shadow-2xl">
+    <div id="settingsPanel" class="settings-panel hidden fixed right-3 left-3 sm:left-auto sm:w-96 bg-navy-950/90 backdrop-blur-xl border border-white/20 rounded-2xl p-4 space-y-3 text-sm z-40 shadow-2xl">
         <div class="flex items-center justify-between border-b border-white/10 pb-2">
             <h2 class="font-black text-white">カメラ・表示設定</h2>
             <button id="closeSettingsBtn" type="button" class="text-slate-400 hover:text-white p-1">✕</button>
