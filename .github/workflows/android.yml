@@ -1,6 +1,6 @@
 # Android アプリ（APK）を自動でビルドして GitHub のリリースに置く
 # アプリ本体（gymnastics_delay_cam.html など）や android/ を更新して push すると、
-# 数分後に https://github.com/ma2ryusk/delay_cam/releases/latest/download/delay_cam.apk が新しい版になる
+# 数分後にリリースの APK が新しい版になる（配布用 URL は変わらない）
 name: Android APK
 
 on:

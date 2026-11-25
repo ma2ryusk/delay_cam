@@ -3,7 +3,7 @@
 スマホ・iPad のカメラで撮った映像を、**指定した秒数だけ遅らせて全画面で流し続ける** Web アプリです。
 演技を終えた選手が、モニターの前に戻ってきてすぐに自分の演技を確認できます。
 
-ブラウザで開くだけで使えます。Android では、インストールして通信なしで使えるアプリ版もあります。
+ブラウザで開くだけで使えます。
 
 ## アプリを開く
 
@@ -14,26 +14,6 @@
 <img src="qr.png" alt="アプリを開くQRコード" width="240">
 
 印刷して配れる説明書（A4・1枚、QR コード付き）：[遅延再生モニター_説明書.pdf](遅延再生モニター_説明書.pdf)
-
-## Android アプリ版（インストール後は通信なしで動作）
-
-**[delay_cam.apk をダウンロード](https://github.com/ma2ryusk/delay_cam/releases/latest/download/delay_cam.apk)**
-
-Android のカメラで下の QR コードを読み取ると、APK を直接ダウンロードできます。
-
-<img src="qr-android.png" alt="Androidアプリをダウンロードする QR コード" width="240">
-
-### インストール手順
-
-1. 上のリンクか QR コードから `delay_cam.apk` をダウンロードする
-2. ダウンロード完了の通知（または「ファイル」アプリのダウンロード）から `delay_cam.apk` を開く
-3. 「この提供元のアプリを許可」を求められたら、設定画面で **許可** を ON にして戻る
-4. 「インストール」を押す（Play プロテクトの確認が出たら「インストールする」を選ぶ）
-5. ホーム画面の「遅延再生モニター」を開き、カメラの使用を **許可** する
-
-- Google Play を通さない配布のため、上のような確認画面が出ます。
-- アプリはインターネット接続の権限を持たず、端末の中だけで動きます。
-- 新しい版は同じリンクからダウンロードして上書きインストールすれば更新できます。
 
 ## 使い方
 
@@ -86,7 +66,6 @@ Android のカメラで下の QR コードを読み取ると、APK を直接ダ�
 | `tailwind.css` | アプリの見た目（Tailwind CSS を生成したファイル） |
 | `index.html` | URL を開いたときにアプリ本体へ移動するページ |
 | `qr.png` | アプリの URL の QR コード |
-| `qr-android.png` | Android アプリ（APK）ダウンロードの QR コード |
 | `遅延再生モニター_説明書.pdf` | 印刷用の説明書（通信量の説明付き） |
 | `manual/manual.html` | 説明書 PDF の元ファイル |
 | `android/` | Android アプリ（アプリ本体を同梱して WebView で表示） |
@@ -105,7 +84,7 @@ npx tailwindcss@3 -c build/tailwind.config.js -i build/tailwind.input.css -o tai
 
 ### Android アプリの更新
 
-`gymnastics_delay_cam.html`・`tailwind.css`・`android/` を変更して `main` に push すると、GitHub Actions が APK を作り直し、上のダウンロードリンクが新しい版になります（数分かかります）。
+`gymnastics_delay_cam.html`・`tailwind.css`・`android/` を変更して `main` に push すると、GitHub Actions が APK を作り直します（数分かかります）。配布用のダウンロード URL は変わりません。
 
 署名鍵はリポジトリには含めず、GitHub の Secrets（`KEYSTORE_BASE64` / `KEYSTORE_PASSWORD`）に登録しています。鍵をなくすと上書き更新ができなくなるため、バックアップを大切に保管してください。
 
