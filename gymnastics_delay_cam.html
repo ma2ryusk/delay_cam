@@ -371,12 +371,6 @@
             <span>バッファ: <strong id="bufferCountText" class="text-brand-orange">0</strong> フレーム</span>
             <span>メモリ使用量: <strong id="memoryUsageText" class="text-white">0.0 MB</strong></span>
         </div>
-
-        <!-- Androidアプリ版のダウンロード（アプリ内では非表示） -->
-        <a id="androidApkLink" href="https://github.com/ma2ryusk/delay_cam/releases/latest/download/delay_cam.apk"
-           class="block text-center text-xs font-bold text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl py-2">
-            Androidアプリ版をダウンロード（通信なしで動作）
-        </a>
     </div>
 
     <!-- リアルタイム小窓プレビュー（右上フローティングPiP：画角確認用） -->
@@ -2142,10 +2136,6 @@
 
             // アプリ起動時にカメラ初期化
             function boot() {
-                // Androidアプリ内で動いているときはダウンロード案内を出さない
-                if (location.hostname === 'appassets.androidplatform.net') {
-                    document.getElementById('androidApkLink').classList.add('hidden');
-                }
                 setDelaySeconds(10);
                 highlightButtons(fpsBtns, b => parseInt(b.dataset.fps, 10) === targetFps);
                 setFitMode('cover');

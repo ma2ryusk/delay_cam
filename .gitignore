@@ -16,3 +16,6 @@ android-signing/
 *.keystore
 Android署名鍵_バックアップ.zip
 *署名鍵*
+
+# Androidアプリ配布用（URL・QR）。手元で配る用のフォルダ
+Androidアプリ配布/
